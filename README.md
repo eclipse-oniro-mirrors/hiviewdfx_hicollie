@@ -1,39 +1,39 @@
-# hiviewdfx_hicollie
+# HiCollie<a name="EN-US_TOPIC_0000001077200880"></a>
 
-#### 介绍
-{**以下是 Gitee 平台说明，您可以替换此简介**
-Gitee 是 OSCHINA 推出的基于 Git 的代码托管平台（同时支持 SVN）。专为开发者提供稳定、高效、安全的云端软件开发协作平台
-无论是个人、团队、或是企业，都能够用 Gitee 实现代码托管、项目管理、协作开发。企业项目请看 [https://gitee.com/enterprises](https://gitee.com/enterprises)}
+-   [Introduction](#section11660541593)
+-   [Architecture](#section342962219551)
+-   [Directory Structure](#section55125489224)
+-   [Constraints](#section161941989596)
+-   [Compilation and Building](#section20568163942320)
+-   [Available APIs](#section8725142134818)
+-   [Usage](#section19959125052315)
+-   [Repositories Involved](#section1134984213235)
 
-#### 软件架构
-软件架构说明
+## Introduction<a name="section11660541593"></a>
 
+HiCollie provides the software watchdog capability. It implements a unified framework for fault detection and fault log generation to help you locate software timeout faults resulting from system service deadlock, application main thread blocking, and service process timeout. 
 
-#### 安装教程
+## Architecture<a name="section342962219551"></a>
 
-1.  xxxx
-2.  xxxx
-3.  xxxx
+## Directory Structure<a name="section55125489224"></a>
 
-#### 使用说明
+```
+/base/hiviewdfx/hicollie                       #  HiCollie home directory
+├── frameworks/native/                       # HiCollie Native code
+├── interfaces/native/innerkits/include      # HiCollie Native header files
+```
 
-1.  xxxx
-2.  xxxx
-3.  xxxx
+## Constraints<a name="section161941989596"></a>
 
-#### 参与贡献
+A maximum of 128 timers can be registered for a single process using the HiCollie API. Excess timers are invalid and cannot be registered to implement timeout detection.
 
-1.  Fork 本仓库
-2.  新建 Feat_xxx 分支
-3.  提交代码
-4.  新建 Pull Request
+## Compilation and Building<a name="section20568163942320"></a>
 
+For details, see the  _HiCollie Development Guide_.
 
-#### 特技
+## Available APIs<a name="section8725142134818"></a>
 
-1.  使用 Readme\_XXX.md 来支持不同的语言，例如 Readme\_en.md, Readme\_zh.md
-2.  Gitee 官方博客 [blog.gitee.com](https://blog.gitee.com)
-3.  你可以 [https://gitee.com/explore](https://gitee.com/explore) 这个地址来了解 Gitee 上的优秀开源项目
-4.  [GVP](https://gitee.com/gvp) 全称是 Gitee 最有价值开源项目，是综合评定出的优秀开源项目
-5.  Gitee 官方提供的使用手册 [https://gitee.com/help](https://gitee.com/help)
-6.  Gitee 封面人物是一档用来展示 Gitee 会员风采的栏目 [https://gitee.com/gitee-stars/](https://gitee.com/gitee-stars/)
+## Repositories Involved<a name="section1134984213235"></a>
+
+[Hivew](https://gitee.com/openharmony)
+
