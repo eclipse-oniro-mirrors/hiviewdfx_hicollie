@@ -42,7 +42,7 @@ ohos_unittest("XCollieUnitTest") {
     "//utils/native/base:utils",
   ]
   external_deps = [
-    "hicollie:libhicollie",
+    "hicollie_native:libhicollie",
     "hilog_native:libhilog",
     "hisysevent_native:libhisysevent",
   ]
