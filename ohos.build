@@ -17,6 +17,9 @@
             ]
           }
         }
+      ],
+      "test_list": [
+        "//base/hiviewdfx/hicollie/frameworks/native/test/unittest/common:unittest"
       ]
     }
   }
