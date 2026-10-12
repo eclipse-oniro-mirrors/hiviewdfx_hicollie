@@ -41,6 +41,7 @@ struct ThreadUnwindContext {
     uintptr_t sp {0};
     uintptr_t fp {0};
     uintptr_t lr {0};
+    size_t copiedStackSize {0};
     std::atomic<uint64_t> requestTime {0};   // begin sample
     std::atomic<uint64_t> snapshotTime {0};  // end of stack copy in signal handler
     std::atomic<uint64_t> processTime {0};   // end of unwind and unique stack
@@ -91,11 +92,15 @@ private:
     ThreadUnwindContext* GetReadContext();
     ThreadUnwindContext* GetWriteContext();
     void WriteContext(void* context);
+    bool GetCoroutineStackEnd(uintptr_t sp, uintptr_t& stackEnd);
+    void FillContextRegs(ThreadUnwindContext& ctx, void* context);
     MAYBE_UNUSED void ResetConsumeInfo();
 
     bool init_ {false};
     uintptr_t stackBegin_ {0};
     uintptr_t stackEnd_ {0};
+    using ArkVmStackRangeFunc = int (*)(void**, size_t*);
+    std::atomic<ArkVmStackRangeFunc> arkVmStackRangeFunc_ {nullptr};
     int32_t pid_ {0};
     std::atomic<int32_t> writeIndex_ {0};
     std::atomic<int32_t> readIndex_ {0};
