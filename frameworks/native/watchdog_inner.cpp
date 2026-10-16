@@ -48,6 +48,7 @@
 typedef void(*ThreadInfoCallBack)(char* buf, size_t len, void* ucontext);
 extern "C" void SetThreadInfoCallback(ThreadInfoCallBack func) __attribute__((weak));
 extern "C" int DfxNotifyWatchdogThreadStart(const char* signalStr) __attribute__((weak));
+extern "C" int DfxNotifySetExitCatchAbort(bool enable, bool isDebuggable) __attribute__((weak));
 namespace OHOS {
 namespace HiviewDFX {
 namespace {
@@ -1345,6 +1346,16 @@ void WatchdogInner::ReadAppStartConfig(const std::string& filePath)
     }
 }
 
+bool WatchdogInner::ConfigureExitCatchAbort(const std::string& value, int (*setExitCatchAbort)(bool, bool))
+{
+    if (setExitCatchAbort != nullptr && (value == "true" || value == "false") &&
+        setExitCatchAbort(value == "true", isHapDebuggable_) != 0) {
+        XCOLLIE_LOGW("Failed to set exit catch abort, errno:%{public}d", errno);
+        return false;
+    }
+    return true;
+}
+
 void WatchdogInner::CreateWatchdogThreadIfNeed()
 {
     std::call_once(flag_, [this] {
@@ -1371,6 +1382,8 @@ void WatchdogInner::CreateWatchdogThreadIfNeed()
             if (DfxNotifyWatchdogThreadStart != nullptr) {
                 DfxNotifyWatchdogThreadStart(signalStr.c_str());
             }
+            std::string exitCatchAbort = OHOS::system::GetParameter("hilog.exit.catch.abort", "");
+            (void)ConfigureExitCatchAbort(exitCatchAbort, DfxNotifySetExitCatchAbort);
             XCOLLIE_LOGD("Watchdog is running!");
         }
     });

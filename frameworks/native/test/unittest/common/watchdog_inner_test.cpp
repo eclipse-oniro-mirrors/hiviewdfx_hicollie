@@ -23,6 +23,7 @@
 #include <dlfcn.h>
 #include <chrono>
 #include <cstdio>
+#include <cerrno>
 #include "watchdog_inner_test.h"
 
 #define private public
@@ -2363,6 +2364,161 @@ HWTEST_F(WatchdogInnerTest, WatchdogInnerTest_GetFfrtEventMsg_003, TestSize.Leve
     std::string msg = "special chars: !@#$%^&*()_+{}|:<>?";
     std::string result = WatchdogInner::GetFfrtEventMsg(msg);
     EXPECT_TRUE(result.find(msg) != std::string::npos);
+}
+namespace {
+struct ExitCatchAbortCall {
+    int count = 0;
+    bool enable = false;
+    bool isDebuggable = false;
+    int result = 0;
+};
+
+ExitCatchAbortCall g_exitCatchAbortCall;
+
+int SetExitCatchAbortForTest(bool enable, bool isDebuggable)
+{
+    ++g_exitCatchAbortCall.count;
+    g_exitCatchAbortCall.enable = enable;
+    g_exitCatchAbortCall.isDebuggable = isDebuggable;
+    return g_exitCatchAbortCall.result;
+}
+} // namespace
+
+class WatchdogExitCatchAbortTest : public testing::Test {
+public:
+    void SetUp() override
+    {
+        originalDebuggable_ = WatchdogInner::GetInstance().isHapDebuggable_;
+        originalErrno_ = errno;
+        WatchdogInner::GetInstance().isHapDebuggable_ = false;
+        g_exitCatchAbortCall = {};
+    }
+
+    void TearDown() override
+    {
+        WatchdogInner::GetInstance().isHapDebuggable_ = originalDebuggable_;
+        errno = originalErrno_;
+    }
+
+private:
+    bool originalDebuggable_ = false;
+    int originalErrno_ = 0;
+};
+
+/**
+ * @tc.name: WatchdogInnerTest_ConfigureExitCatchAbort_001
+ * @tc.desc: Enable exit catch using the cached debug state.
+ * @tc.type: FUNC
+ */
+HWTEST_F(WatchdogExitCatchAbortTest, WatchdogInnerTest_ConfigureExitCatchAbort_001, TestSize.Level1)
+{
+    WatchdogInner::GetInstance().isHapDebuggable_ = true;
+    EXPECT_TRUE(WatchdogInner::GetInstance().ConfigureExitCatchAbort("true", SetExitCatchAbortForTest));
+    EXPECT_EQ(g_exitCatchAbortCall.count, 1);
+    EXPECT_TRUE(g_exitCatchAbortCall.enable);
+    EXPECT_TRUE(g_exitCatchAbortCall.isDebuggable);
+}
+
+/**
+ * @tc.name: WatchdogInnerTest_ConfigureExitCatchAbort_002
+ * @tc.desc: Disable exit catch without changing the cached debug state.
+ * @tc.type: FUNC
+ */
+HWTEST_F(WatchdogExitCatchAbortTest, WatchdogInnerTest_ConfigureExitCatchAbort_002, TestSize.Level1)
+{
+    WatchdogInner::GetInstance().isHapDebuggable_ = true;
+    EXPECT_TRUE(WatchdogInner::GetInstance().ConfigureExitCatchAbort("false", SetExitCatchAbortForTest));
+    EXPECT_EQ(g_exitCatchAbortCall.count, 1);
+    EXPECT_FALSE(g_exitCatchAbortCall.enable);
+    EXPECT_TRUE(g_exitCatchAbortCall.isDebuggable);
+}
+
+/**
+ * @tc.name: WatchdogInnerTest_ConfigureExitCatchAbort_003
+ * @tc.desc: Pass the cached non-debug state to faultloggerd.
+ * @tc.type: FUNC
+ */
+HWTEST_F(WatchdogExitCatchAbortTest, WatchdogInnerTest_ConfigureExitCatchAbort_003, TestSize.Level1)
+{
+    EXPECT_TRUE(WatchdogInner::GetInstance().ConfigureExitCatchAbort("true", SetExitCatchAbortForTest));
+    EXPECT_EQ(g_exitCatchAbortCall.count, 1);
+    EXPECT_TRUE(g_exitCatchAbortCall.enable);
+    EXPECT_FALSE(g_exitCatchAbortCall.isDebuggable);
+}
+
+/**
+ * @tc.name: WatchdogInnerTest_ConfigureExitCatchAbort_004
+ * @tc.desc: An unset or empty parameter does not call faultloggerd.
+ * @tc.type: FUNC
+ */
+HWTEST_F(WatchdogExitCatchAbortTest, WatchdogInnerTest_ConfigureExitCatchAbort_004, TestSize.Level1)
+{
+    auto& watchdog = WatchdogInner::GetInstance();
+    watchdog.isHapDebuggable_ = true;
+    g_exitCatchAbortCall.result = -1;
+    EXPECT_TRUE(watchdog.ConfigureExitCatchAbort("", SetExitCatchAbortForTest));
+    EXPECT_EQ(g_exitCatchAbortCall.count, 0);
+    EXPECT_TRUE(watchdog.isHapDebuggable_);
+}
+
+/**
+ * @tc.name: WatchdogInnerTest_ConfigureExitCatchAbort_005
+ * @tc.desc: Invalid parameter values do not call faultloggerd.
+ * @tc.type: FUNC
+ */
+HWTEST_F(WatchdogExitCatchAbortTest, WatchdogInnerTest_ConfigureExitCatchAbort_005, TestSize.Level1)
+{
+    const char* invalidValues[] = {"TRUE", "FALSE", "1", "0", " true", "false ", "invalid"};
+    for (const auto* value : invalidValues) {
+        EXPECT_TRUE(WatchdogInner::GetInstance().ConfigureExitCatchAbort(value, SetExitCatchAbortForTest));
+    }
+    EXPECT_EQ(g_exitCatchAbortCall.count, 0);
+}
+
+/**
+ * @tc.name: WatchdogInnerTest_ConfigureExitCatchAbort_006
+ * @tc.desc: A missing weak interface is skipped safely.
+ * @tc.type: FUNC
+ */
+HWTEST_F(WatchdogExitCatchAbortTest, WatchdogInnerTest_ConfigureExitCatchAbort_006, TestSize.Level1)
+{
+    auto& watchdog = WatchdogInner::GetInstance();
+    watchdog.isHapDebuggable_ = true;
+    EXPECT_TRUE(watchdog.ConfigureExitCatchAbort("true", nullptr));
+    EXPECT_TRUE(watchdog.ConfigureExitCatchAbort("false", nullptr));
+    EXPECT_EQ(g_exitCatchAbortCall.count, 0);
+    EXPECT_TRUE(watchdog.isHapDebuggable_);
+}
+
+/**
+ * @tc.name: WatchdogInnerTest_ConfigureExitCatchAbort_007
+ * @tc.desc: An enable failure is reported after one interface call.
+ * @tc.type: FUNC
+ */
+HWTEST_F(WatchdogExitCatchAbortTest, WatchdogInnerTest_ConfigureExitCatchAbort_007, TestSize.Level1)
+{
+    WatchdogInner::GetInstance().isHapDebuggable_ = true;
+    g_exitCatchAbortCall.result = -1;
+    errno = EIO;
+    EXPECT_FALSE(WatchdogInner::GetInstance().ConfigureExitCatchAbort("true", SetExitCatchAbortForTest));
+    EXPECT_EQ(g_exitCatchAbortCall.count, 1);
+    EXPECT_TRUE(g_exitCatchAbortCall.enable);
+    EXPECT_TRUE(g_exitCatchAbortCall.isDebuggable);
+}
+
+/**
+ * @tc.name: WatchdogInnerTest_ConfigureExitCatchAbort_008
+ * @tc.desc: A disable failure is reported after one interface call.
+ * @tc.type: FUNC
+ */
+HWTEST_F(WatchdogExitCatchAbortTest, WatchdogInnerTest_ConfigureExitCatchAbort_008, TestSize.Level1)
+{
+    g_exitCatchAbortCall.result = -1;
+    errno = EACCES;
+    EXPECT_FALSE(WatchdogInner::GetInstance().ConfigureExitCatchAbort("false", SetExitCatchAbortForTest));
+    EXPECT_EQ(g_exitCatchAbortCall.count, 1);
+    EXPECT_FALSE(g_exitCatchAbortCall.enable);
+    EXPECT_FALSE(g_exitCatchAbortCall.isDebuggable);
 }
 } // namespace HiviewDFX
 } // namespace OHOS
