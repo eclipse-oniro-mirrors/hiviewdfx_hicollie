@@ -119,6 +119,10 @@ bool ThreadSampler::Init(size_t collectStackCount, bool recordSubmitterStack)
         return true;
     }
 
+    ResetConsumeInfo();
+    heaviestStack_.clear();
+    processStartTime_ = 0;
+    processFinishTime_ = 0;
     if (!InitRecordBuffer()) {
         XCOLLIE_LOGE("Failed to InitRecordBuffer\n");
         Deinit();
@@ -466,8 +470,8 @@ bool ThreadSampler::CollectStack(std::string& stack, bool treeFormat)
         }
     } else {
         stack = stackPrinter_->GetTreeStack(pid_);
-        heaviestStack_ = stackPrinter_->GetHeaviestStack(pid_);
     }
+    heaviestStack_ = stackPrinter_->GetHeaviestStack(pid_);
 
 #if defined(CONSUME_STATISTICS)
     uint64_t collectEnd = GetCurrentTimeNanoseconds();

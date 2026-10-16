@@ -102,6 +102,7 @@ public:
     std::string StopSample(int sampleCount);
     bool CheckSample(const TimePoint& endTime, int64_t durationTime);
     SamplerResult GetSamplerResult();
+    std::string GetHeaviestStack();
     int32_t GetReservedTimeForLogging();
 
 public:
@@ -164,6 +165,7 @@ private:
 #endif
     void InitDefaultTask();
     bool CheckTaskValid(int duration, int interval, int& targetCount, std::string& result);
+    void RunFreezeSampleTask(int32_t pid, int targetCount);
 
     static void ThreadSamplerSigHandler(int sig, siginfo_t* si, void* context);
     bool InstallThreadSamplerSignal();
@@ -192,7 +194,9 @@ private:
     ThreadSamplerCollectFunc threadSamplerCollectFunc_ {nullptr};
     ThreadSamplerDeinitFunc threadSamplerDeinitFunc_ {nullptr};
     ThreadSamplerGetResultFunc threadSamplerGetResultFunc_ {nullptr};
-    SamplerResult samplerResult_ {0, 0, 0};
+    std::mutex freezeResultMutex_;
+    SamplerResult samplerResult_ {0, 0, -1};
+    std::string heaviestStack_;
     uint64_t watchdogStartTime_ {0};
     static std::mutex threadSamplerSignalMutex_;
 

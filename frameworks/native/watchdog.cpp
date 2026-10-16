@@ -149,6 +149,11 @@ void Watchdog::GetSamplerResult(uint64_t &samplerStartTime, uint64_t &samplerFin
     samplerCount = result.samplerCount;
 }
 
+std::string Watchdog::GetHeaviestStack()
+{
+    return WatchdogInner::GetInstance().GetHeaviestStack();
+}
+
 int32_t Watchdog::GetReservedTimeForLogging()
 {
     return WatchdogInner::GetInstance().GetReservedTimeForLogging();

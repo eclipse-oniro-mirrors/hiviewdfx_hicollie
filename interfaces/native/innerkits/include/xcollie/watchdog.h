@@ -187,6 +187,7 @@ public:
      * @brief Get sampler result.
      */
     void GetSamplerResult(uint64_t &samplerStartTime, uint64_t &samplerFinishTime, int32_t &samplerCount);
+    std::string GetHeaviestStack();
 
     /**
      * Add handler to watchdog thread with customized check interval

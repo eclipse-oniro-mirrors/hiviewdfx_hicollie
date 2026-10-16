@@ -41,11 +41,11 @@ int ThreadSamplerCollect(char* stack, char* heaviestStack, size_t stackSize, siz
     if (strncpy_s(stack, stackSize, stk.c_str(), len) != EOK) {
         return FAIL;
     }
-    if (enableTreeFormat) {
-        std::string heaviest = ThreadSampler::GetInstance().GetHeaviestStack();
-        size_t heaviestLen = (heaviest.size() >= heaviestSize ? heaviestSize - 1 : heaviest.size());
-        if (strncpy_s(heaviestStack, heaviestSize, heaviest.c_str(), heaviestLen) != EOK) {
-            return FAIL;
+    std::string heaviest = ThreadSampler::GetInstance().GetHeaviestStack();
+    if (heaviestStack != nullptr && heaviestSize > 0) {
+        heaviestStack[0] = '\0';
+        if (heaviest.size() < heaviestSize) {
+            (void)strncpy_s(heaviestStack, heaviestSize, heaviest.c_str(), heaviest.size());
         }
     }
     return success;

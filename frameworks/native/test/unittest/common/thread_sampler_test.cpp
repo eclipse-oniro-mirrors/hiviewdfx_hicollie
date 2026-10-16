@@ -635,5 +635,53 @@ HWTEST_F(ThreadSamplerTest, ThreadSamplerTest_009, TestSize.Level3)
     std::string timeStr = TimeFormat(testTime);
     ASSERT_EQ(timeStr, "2024-05-21-17-12-36.003107");
 }
+
+HWTEST_F(ThreadSamplerTest, Req1PlainCollectionAndNewRoundReset, TestSize.Level1)
+{
+    auto& sampler = ThreadSampler::GetInstance();
+    sampler.Deinit();
+    ASSERT_TRUE(InstallThreadSamplerTestSignal());
+    ASSERT_TRUE(sampler.Init(4, false));
+    for (int i = 0; i < 3; ++i) {
+        ASSERT_EQ(sampler.Sample(), 0);
+        usleep(10000);
+    }
+    std::string stack;
+    ASSERT_TRUE(sampler.CollectStack(stack, false));
+    EXPECT_FALSE(sampler.GetHeaviestStack().empty());
+    const auto result = sampler.ThreadSamplerGetResult();
+    EXPECT_GT(result.samplerCount, 0);
+    EXPECT_LE(result.samplerCount, 3);
+    sampler.Deinit();
+    ASSERT_TRUE(sampler.Init(4, false));
+    EXPECT_EQ(sampler.ThreadSamplerGetResult().samplerCount, 0);
+    EXPECT_TRUE(sampler.GetHeaviestStack().empty());
+    EXPECT_FALSE(sampler.CollectStack(stack, false));
+    EXPECT_TRUE(sampler.GetHeaviestStack().empty());
+    sampler.Deinit();
+    EXPECT_FALSE(sampler.Init(0, false));
+    EXPECT_EQ(sampler.ThreadSamplerGetResult().samplerCount, 0);
+    EXPECT_TRUE(sampler.GetHeaviestStack().empty());
+}
+
+HWTEST_F(ThreadSamplerTest, Req1OptionalHeaviestBufferKeepsPlainLog, TestSize.Level1)
+{
+    ASSERT_TRUE(TestInitThreadSampler());
+    ASSERT_EQ(threadSamplerInitFunc_(4, 0), 0);
+    for (int i = 0; i < 3; ++i) {
+        ASSERT_EQ(threadSamplerSampleFunc_(), 0);
+        usleep(10000);
+    }
+    char stack[STACK_LENGTH] {};
+    char heaviest[1] {'x'};
+    EXPECT_EQ(threadSamplerCollectFunc_(stack, heaviest, sizeof(stack), sizeof(heaviest), 0), 0);
+    EXPECT_NE(stack[0], '\0');
+    EXPECT_EQ(heaviest[0], '\0');
+    EXPECT_EQ(threadSamplerDeinitFunc_(), 0);
+    TestUninstallThreadSamplerSignal();
+    dlclose(threadSamplerFuncHandler_);
+    threadSamplerFuncHandler_ = nullptr;
+}
+
 }  // end of namespace HiviewDFX
 }  // end of namespace OHOS

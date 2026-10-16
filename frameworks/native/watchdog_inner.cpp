@@ -423,10 +423,7 @@ void WatchdogInner::ResetThreadSamplerFuncs()
     threadSamplerCollectFunc_ = nullptr;
     threadSamplerDeinitFunc_ = nullptr;
     threadSamplerSigHandler_ = nullptr;
-    if (threadSamplerGetResultFunc_) {
-        samplerResult_ = threadSamplerGetResultFunc_();
-        threadSamplerGetResultFunc_ = nullptr;
-    }
+    threadSamplerGetResultFunc_ = nullptr;
     dlclose(threadSamplerFuncHandler_);
     threadSamplerFuncHandler_ = nullptr;
 }
@@ -736,6 +733,9 @@ void WatchdogInner::StartProfileMainThread(const TimePoint& endTime, int64_t dur
 std::string WatchdogInner::SaveFreezeStackToFile(int32_t pid)
 {
     ResetFreezeSampleFlags();
+    std::lock_guard<std::mutex> resultLock(freezeResultMutex_);
+    heaviestStack_.clear();
+    samplerResult_ = {0, 0, -1};
     if (!CreateDir(FREEZE_DIR)) {
         XCOLLIE_LOGE("Path to realPath failed.");
         return "";
@@ -743,10 +743,15 @@ std::string WatchdogInner::SaveFreezeStackToFile(int32_t pid)
     XCOLLIE_LOGI("Start to collect stack, pid:%{public}d.", pid);
     std::string stack;
     std::string heaviestStack;
-    if (!CollectStack(stack, heaviestStack, 0)) {
+    bool collected = CollectStack(stack, heaviestStack, 0);
+    if (threadSamplerGetResultFunc_ != nullptr) {
+        samplerResult_ = threadSamplerGetResultFunc_();
+    }
+    if (!collected) {
         XCOLLIE_LOGI("Collect freeze sample stack failed.");
         return "";
     }
+    heaviestStack_ = std::move(heaviestStack);
     std::string info = "#ThreadInfos Tid: " + std::to_string(pid) + ", Name: " + bundleName_ + "\n";
     if (g_isReuseStack) {
         info += "The current thread is collecting the stack, which conflicts with the main thread jank event."
@@ -798,6 +803,32 @@ bool WatchdogInner::CheckTaskValid(int duration, int interval, int& targetCount,
     return true;
 }
 
+void WatchdogInner::RunFreezeSampleTask(int32_t pid, int targetCount)
+{
+    if (g_freezeSampleCount.load() == 0 && g_isDumpStack) {
+        g_isReuseStack.store(true);
+    }
+    if (g_isReuseStack) {
+        if (!g_isDumpStack) {
+            SaveFreezeStackToFile(pid);
+        }
+        return;
+    }
+    if ((g_freezeSampleCount.load() == 0 && !CheckThreadSampler(initAsyncStack_)) ||
+        threadSamplerSampleFunc_ == nullptr) {
+        ResetFreezeSampleFlags();
+        return;
+    }
+    if (g_freezeSampleCount.load() < targetCount) {
+        g_isDumpStack.store(true);
+        threadSamplerSampleFunc_();
+    } else {
+        g_freezeSampleCount.fetch_add(DEFAULT_SAMPLE_VALUE);
+        SaveFreezeStackToFile(pid);
+    }
+    g_freezeSampleCount.fetch_add(DEFAULT_SAMPLE_VALUE);
+}
+
 std::string WatchdogInner::StartSample(int duration, int interval)
 {
     int targetCount = 0;
@@ -805,37 +836,20 @@ std::string WatchdogInner::StartSample(int duration, int interval)
     if (!CheckTaskValid(duration, interval, targetCount, result)) {
         return result;
     }
+    {
+        std::lock_guard<std::mutex> resultLock(freezeResultMutex_);
+        heaviestStack_.clear();
+        samplerResult_ = {0, 0, -1};
+        sampleFreezeInfo_.freezeFile.clear();
+    }
     int32_t pid = getpid();
     g_freezeSampleCount.store(0);
-    auto sampleTask = [this, pid, targetCount]() {
-        if (g_freezeSampleCount.load() == 0 && g_isDumpStack) {
-            g_isReuseStack.store(true);
-        }
-        if (g_isReuseStack) {
-            if (!g_isDumpStack) {
-                SaveFreezeStackToFile(pid);
-            }
-            return;
-        }
-        if ((g_freezeSampleCount.load() == 0 && !CheckThreadSampler(initAsyncStack_)) ||
-             threadSamplerSampleFunc_ == nullptr) {
-            ResetFreezeSampleFlags();
-            return;
-        }
-        if (g_freezeSampleCount.load() < targetCount) {
-            g_isDumpStack.store(true);
-            threadSamplerSampleFunc_();
-        } else {
-            g_freezeSampleCount.fetch_add(DEFAULT_SAMPLE_VALUE);
-            SaveFreezeStackToFile(pid);
-        }
-        g_freezeSampleCount.fetch_add(DEFAULT_SAMPLE_VALUE);
-    };
+    auto sampleTask = [this, pid, targetCount]() { RunFreezeSampleTask(pid, targetCount); };
     WatchdogTask task(FREEZE_SAMPLE, sampleTask, 0, interval, false);
     int id = 0;
     {
         std::unique_lock<std::mutex> lock(lock_);
-        id =  InsertWatchdogTaskLocked(FREEZE_SAMPLE, std::move(task));
+        id = InsertWatchdogTaskLocked(FREEZE_SAMPLE, std::move(task));
     }
     std::string file = "";
     if (id != 0) {
@@ -856,7 +870,14 @@ std::string WatchdogInner::StopSample(int sampleCount)
     if (g_freezeSampleCount.load() > 0 && g_freezeSampleCount.load() <= sampleCount) {
         return SaveFreezeStackToFile(pid);
     }
+    std::lock_guard<std::mutex> resultLock(freezeResultMutex_);
     uint64_t curTime = GetCurrentTickMillseconds();
+    constexpr uint64_t maxResultAge = 15000;
+    if (sampleFreezeInfo_.lastSaveTime == 0 || curTime < sampleFreezeInfo_.lastSaveTime ||
+        curTime - sampleFreezeInfo_.lastSaveTime > maxResultAge) {
+        heaviestStack_.clear();
+        samplerResult_ = {0, 0, -1};
+    }
     XCOLLIE_LOGW("get lastest freeze file: %{public}s, interval: %{public}" PRIu64 ".",
         sampleFreezeInfo_.freezeFile.c_str(), (curTime - sampleFreezeInfo_.lastSaveTime));
     return sampleFreezeInfo_.freezeFile;
@@ -864,10 +885,14 @@ std::string WatchdogInner::StopSample(int sampleCount)
 
 SamplerResult WatchdogInner::GetSamplerResult()
 {
-    if (threadSamplerGetResultFunc_ != nullptr) {
-        samplerResult_ = threadSamplerGetResultFunc_();
-    }
+    std::lock_guard<std::mutex> resultLock(freezeResultMutex_);
     return samplerResult_;
+}
+
+std::string WatchdogInner::GetHeaviestStack()
+{
+    std::lock_guard<std::mutex> resultLock(freezeResultMutex_);
+    return heaviestStack_;
 }
 
 bool WatchdogInner::CollectStack(std::string& stack, std::string& heaviestStack, int treeFormat)
