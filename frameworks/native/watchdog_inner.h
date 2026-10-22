@@ -132,6 +132,7 @@ private:
     uint64_t FetchNextTask(uint64_t now, WatchdogTask& task);
     void ReInsertTaskIfNeed(WatchdogTask& task);
     void CreateWatchdogThreadIfNeed();
+    bool ConfigureExitCatchAbort(const std::string& value, int (*setExitCatchAbort)(bool, bool));
     bool ReportMainThreadEvent(int64_t tid, std::string eventName, bool isScroll = false, bool appStart = false);
     bool CheckEventTimer(int64_t currentTime, int64_t reportBegin, int64_t reportEnd, int interval);
     void DumpTraceTask(int32_t interval);
