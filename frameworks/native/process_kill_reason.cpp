@@ -158,22 +158,68 @@ constexpr bool IsConfigSorted()
 }
 static_assert(IsConfigSorted(), "KILL_REASON_CONFIG must be sorted by id");
 
-const KillReasonEntry* FindEntry(int32_t killId)
+// ===== FAST LOOKUP v1: compile-time segmented direct index =================
+// The id space is documented as 1000-wide ranges (1-9, 1000-1009, 2000-2024,
+// 3000-3054, 4000-4011) and ids inside a range are contiguous. That makes
+// id -> &KILL_REASON_CONFIG[i] computable with two independent loads and no loop.
+constexpr int32_t SEG_WIDTH = 1000;
+constexpr int32_t ID_LIMIT = 5000;                       // exclusive upper bound
+constexpr int32_t SEG_NUM = ID_LIMIT / SEG_WIDTH;
+
+struct Segment {
+    int32_t base;   // first id of the segment, -1 when the segment is empty
+    int32_t count;  // number of entries in the segment
+    int32_t offset; // index of the first entry inside KILL_REASON_CONFIG
+};
+
+constexpr Segment MakeSegment(int32_t seg)
 {
-    int32_t left = 0;
-    int32_t right = static_cast<int32_t>(REASON_CONFIG_COUNT) - 1;
-    while (left <= right) {
-        int32_t mid = left + (right - left) / 2;
-        if (KILL_REASON_CONFIG[mid].id == killId) {
-            return &KILL_REASON_CONFIG[mid];
-        }
-        if (KILL_REASON_CONFIG[mid].id < killId) {
-            left = mid + 1;
-        } else {
-            right = mid - 1;
+    Segment s{-1, 0, 0};
+    for (size_t i = 0; i < REASON_CONFIG_COUNT; ++i) {
+        if (KILL_REASON_CONFIG[i].id / SEG_WIDTH == seg) {
+            if (s.base < 0) {
+                s.base = KILL_REASON_CONFIG[i].id;
+                s.offset = static_cast<int32_t>(i);
+            }
+            s.count++;
         }
     }
-    return nullptr;
+    return s;
+}
+
+constexpr Segment SEGMENTS[SEG_NUM] = {
+    MakeSegment(0), MakeSegment(1), MakeSegment(2), MakeSegment(3), MakeSegment(4)
+};
+
+// Correctness of the index depends on contiguity inside each segment; if someone
+// later adds a non-contiguous id the build fails instead of returning a wrong reason.
+constexpr bool IsSegmentContiguous()
+{
+    for (int32_t s = 0; s < SEG_NUM; ++s) {
+        for (int32_t i = 0; i < SEGMENTS[s].count; ++i) {
+            if (KILL_REASON_CONFIG[SEGMENTS[s].offset + i].id != SEGMENTS[s].base + i) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+static_assert(IsSegmentContiguous(),
+              "ids inside one 1000-range must stay contiguous: please update FindEntry");
+static_assert(KILL_REASON_CONFIG[REASON_CONFIG_COUNT - 1].id < ID_LIMIT,
+              "max kill id must stay inside the documented id space");
+
+const KillReasonEntry* FindEntry(int32_t killId)
+{
+    if (static_cast<uint32_t>(killId) >= static_cast<uint32_t>(ID_LIMIT)) {
+        return nullptr;
+    }
+    const Segment& seg = SEGMENTS[killId / SEG_WIDTH];
+    const uint32_t off = static_cast<uint32_t>(killId - seg.base);
+    if (off >= static_cast<uint32_t>(seg.count)) {
+        return nullptr;
+    }
+    return &KILL_REASON_CONFIG[seg.offset + off];
 }
 }
 
