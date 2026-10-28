@@ -492,6 +492,7 @@ HWTEST_F(ThreadSamplerTest, ThreadSamplerTest_006, TestSize.Level0)
 #undef private
 #undef protected
 #include "thread_sampler_utils.h"
+#include "thread_sampler_api.h"
 
 namespace OHOS {
 namespace HiviewDFX {
@@ -681,6 +682,153 @@ HWTEST_F(ThreadSamplerTest, Req1OptionalHeaviestBufferKeepsPlainLog, TestSize.Le
     TestUninstallThreadSamplerSignal();
     dlclose(threadSamplerFuncHandler_);
     threadSamplerFuncHandler_ = nullptr;
+}
+
+/**
+ * @tc.name: ThreadSamplerCollect_001
+ * @tc.desc: Verify ThreadSamplerCollect copies heaviest stack into a sufficiently large buffer.
+ * @tc.type: FUNC
+ * @tc.require
+ */
+HWTEST_F(ThreadSamplerTest, ThreadSamplerCollect_001, TestSize.Level1)
+{
+    printf("ThreadSamplerCollect_001\n");
+    ASSERT_TRUE(InstallThreadSamplerTestSignal());
+    auto& sampler = ThreadSampler::GetInstance();
+    sampler.Deinit();
+    ASSERT_TRUE(sampler.Init(4, false));
+    for (int i = 0; i < 3; ++i) {
+        ASSERT_EQ(sampler.Sample(), 0);
+        usleep(10000);
+    }
+    std::string dummy;
+    ASSERT_TRUE(sampler.CollectStack(dummy, false));
+    std::string heaviest = sampler.GetHeaviestStack();
+    ASSERT_FALSE(heaviest.empty());
+
+    char stack[STACK_LENGTH] {};
+    char heaviestBuf[STACK_LENGTH] {};
+    EXPECT_EQ(ThreadSamplerCollect(stack, heaviestBuf, sizeof(stack), sizeof(heaviestBuf), 0), 0);
+    EXPECT_EQ(std::string(heaviestBuf), heaviest);
+    sampler.Deinit();
+}
+
+/**
+ * @tc.name: ThreadSamplerCollect_002
+ * @tc.desc: Verify ThreadSamplerCollect returns success and does not crash when heaviestStack is nullptr.
+ * @tc.type: FUNC
+ * @tc.require
+ */
+HWTEST_F(ThreadSamplerTest, ThreadSamplerCollect_002, TestSize.Level1)
+{
+    printf("ThreadSamplerCollect_002\n");
+    ASSERT_TRUE(InstallThreadSamplerTestSignal());
+    auto& sampler = ThreadSampler::GetInstance();
+    sampler.Deinit();
+    ASSERT_TRUE(sampler.Init(4, false));
+    for (int i = 0; i < 3; ++i) {
+        ASSERT_EQ(sampler.Sample(), 0);
+        usleep(10000);
+    }
+    std::string dummy;
+    ASSERT_TRUE(sampler.CollectStack(dummy, false));
+
+    char stack[STACK_LENGTH] {};
+    EXPECT_EQ(ThreadSamplerCollect(stack, nullptr, sizeof(stack), 0, 0), 0);
+    sampler.Deinit();
+}
+
+/**
+ * @tc.name: ThreadSamplerCollect_003
+ * @tc.desc: Verify ThreadSamplerCollect returns success when heaviestSize is zero.
+ * @tc.type: FUNC
+ * @tc.require
+ */
+HWTEST_F(ThreadSamplerTest, ThreadSamplerCollect_003, TestSize.Level1)
+{
+    printf("ThreadSamplerCollect_003\n");
+    ASSERT_TRUE(InstallThreadSamplerTestSignal());
+    auto& sampler = ThreadSampler::GetInstance();
+    sampler.Deinit();
+    ASSERT_TRUE(sampler.Init(4, false));
+    for (int i = 0; i < 3; ++i) {
+        ASSERT_EQ(sampler.Sample(), 0);
+        usleep(10000);
+    }
+    std::string dummy;
+    ASSERT_TRUE(sampler.CollectStack(dummy, false));
+
+    char stack[STACK_LENGTH] {};
+    char heaviestBuf[STACK_LENGTH] {};
+    EXPECT_EQ(ThreadSamplerCollect(stack, heaviestBuf, sizeof(stack), 0, 0), 0);
+    EXPECT_EQ(heaviestBuf[0], '\0');
+    sampler.Deinit();
+}
+
+/**
+ * @tc.name: ThreadSamplerCollect_004
+ * @tc.desc: Verify heaviest stack is not copied when heaviestSize equals heaviest.size() (no room for NUL).
+ * @tc.type: FUNC
+ * @tc.require
+ */
+HWTEST_F(ThreadSamplerTest, ThreadSamplerCollect_004, TestSize.Level1)
+{
+    printf("ThreadSamplerCollect_004\n");
+    ASSERT_TRUE(InstallThreadSamplerTestSignal());
+    auto& sampler = ThreadSampler::GetInstance();
+    sampler.Deinit();
+    ASSERT_TRUE(sampler.Init(4, false));
+    for (int i = 0; i < 3; ++i) {
+        ASSERT_EQ(sampler.Sample(), 0);
+        usleep(10000);
+    }
+    std::string dummy;
+    ASSERT_TRUE(sampler.CollectStack(dummy, false));
+    std::string heaviest = sampler.GetHeaviestStack();
+    ASSERT_FALSE(heaviest.empty());
+
+    size_t heaviestSize = heaviest.size();
+    char stack[STACK_LENGTH] {};
+    char* heaviestBuf = new(std::nothrow) char[heaviestSize];
+    ASSERT_NE(heaviestBuf, nullptr);
+    heaviestBuf[0] = 'x';
+    EXPECT_EQ(ThreadSamplerCollect(stack, heaviestBuf, sizeof(stack), heaviestSize, 0), 0);
+    EXPECT_EQ(heaviestBuf[0], '\0');
+    delete[] heaviestBuf;
+    sampler.Deinit();
+}
+
+/**
+ * @tc.name: ThreadSamplerCollect_005
+ * @tc.desc: Verify heaviest stack is copied when heaviestSize equals heaviest.size() + 1 (exact fit for NUL).
+ * @tc.type: FUNC
+ * @tc.require
+ */
+HWTEST_F(ThreadSamplerTest, ThreadSamplerCollect_005, TestSize.Level1)
+{
+    printf("ThreadSamplerCollect_005\n");
+    ASSERT_TRUE(InstallThreadSamplerTestSignal());
+    auto& sampler = ThreadSampler::GetInstance();
+    sampler.Deinit();
+    ASSERT_TRUE(sampler.Init(4, false));
+    for (int i = 0; i < 3; ++i) {
+        ASSERT_EQ(sampler.Sample(), 0);
+        usleep(10000);
+    }
+    std::string dummy;
+    ASSERT_TRUE(sampler.CollectStack(dummy, false));
+    std::string heaviest = sampler.GetHeaviestStack();
+    ASSERT_FALSE(heaviest.empty());
+
+    size_t heaviestSize = heaviest.size() + 1;
+    char stack[STACK_LENGTH] {};
+    char* heaviestBuf = new(std::nothrow) char[heaviestSize];
+    ASSERT_NE(heaviestBuf, nullptr);
+    heaviestBuf[0] = 'x';
+    EXPECT_EQ(ThreadSamplerCollect(stack, heaviestBuf, sizeof(stack), heaviestSize, 0), 0);
+    EXPECT_EQ(std::string(heaviestBuf), heaviest);
+    delete[] heaviestBuf;
+    sampler.Deinit();
 }
 
 }  // end of namespace HiviewDFX

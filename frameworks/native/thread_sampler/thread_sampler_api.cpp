@@ -44,8 +44,9 @@ int ThreadSamplerCollect(char* stack, char* heaviestStack, size_t stackSize, siz
     std::string heaviest = ThreadSampler::GetInstance().GetHeaviestStack();
     if (heaviestStack != nullptr && heaviestSize > 0) {
         heaviestStack[0] = '\0';
-        if (heaviest.size() < heaviestSize) {
-            (void)strncpy_s(heaviestStack, heaviestSize, heaviest.c_str(), heaviest.size());
+        if (heaviest.size() < heaviestSize &&
+            strncpy_s(heaviestStack, heaviestSize, heaviest.c_str(), heaviest.size()) != EOK) {
+            return FAIL;
         }
     }
     return success;
