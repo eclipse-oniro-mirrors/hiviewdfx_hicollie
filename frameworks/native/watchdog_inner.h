@@ -36,6 +36,7 @@
 
 namespace OHOS {
 namespace HiviewDFX {
+constexpr const char* KICK_WATCHDOG_TASK = "Kick_Watchdog_Task";
 class WatchdogInner : public Singleton<WatchdogInner> {
     DECLARE_SINGLETON(WatchdogInner);
 

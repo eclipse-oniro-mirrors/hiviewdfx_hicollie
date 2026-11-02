@@ -191,12 +191,7 @@ void WatchdogTask::Run(uint64_t now)
         return;
     }
 #ifdef LOW_MEMORY_FREEZE_STRATEGY_ENABLE
-    if (lowMemoryCheck) {
-        int64_t mem = GetAvailMemory();
-        if (mem > 0 && mem <= BELOW_MEM_SIZE) {
-            lastLowMemoryTime = now;
-        }
-    }
+    UpdateLowMemoryTime(now);
 #endif
 #ifdef SUSPEND_CHECK_ENABLE
     uint64_t blockedThresholdMs = 2000;
@@ -204,17 +199,21 @@ void WatchdogTask::Run(uint64_t now)
     static uint32_t uid = getuid();
     if ((uid == RENDER_SERVICE_UID) && (now - nextTickTime >= TIME_THREAD)) {
         XCOLLIE_LOGI("checker thread may be blocked, reset next tick time."
-            "now:%{public}" PRIu64 " expect:%{public}" PRIu64 " diff:%{public}" PRIu64 " interval:%{public}" PRIu64 "",
-            now, nextTickTime, now - nextTickTime, checkInterval);
+            "now:%{public}" PRIu64 " expect:%{public}" PRIu64
+            " diff:%{public}" PRIu64 " interval:%{public}" PRIu64
+            " name:%{public}s",
+            now, nextTickTime, now - nextTickTime, checkInterval, name.c_str());
     }
+    bool isExemptFromBlockedCheck = (name == KICK_WATCHDOG_TASK);
 #else
     constexpr int resetRatio = 2;
     uint64_t blockedThresholdMs = resetRatio * checkInterval;
+    constexpr bool isExemptFromBlockedCheck = false;
 #endif
-    if ((checkInterval != 0) && (now - nextTickTime > blockedThresholdMs)) {
+    if ((checkInterval != 0) && (now - nextTickTime > blockedThresholdMs) && !isExemptFromBlockedCheck) {
         XCOLLIE_LOGI("checker thread may be blocked, reset next tick time."
-            "now:%{public}" PRIu64 " expect:%{public}" PRIu64 " interval:%{public}" PRIu64 "",
-            now, nextTickTime, checkInterval);
+            "now:%{public}" PRIu64 " expect:%{public}" PRIu64 " interval:%{public}" PRIu64 " name:%{public}s",
+            now, nextTickTime, checkInterval, name.c_str());
         nextTickTime = now;
         return;
     }
@@ -542,6 +541,16 @@ inline std::string WatchdogTask::GetBlockDescription(uint64_t interval)
 }
 
 #ifdef LOW_MEMORY_FREEZE_STRATEGY_ENABLE
+void WatchdogTask::UpdateLowMemoryTime(uint64_t now)
+{
+    if (lowMemoryCheck) {
+        int64_t mem = GetAvailMemory();
+        if (mem > 0 && mem <= BELOW_MEM_SIZE) {
+            lastLowMemoryTime = now;
+        }
+    }
+}
+
 bool WatchdogTask::ShouldCheckLowMemory()
 {
     if (getuid() == RENDER_SERVICE_UID) {
