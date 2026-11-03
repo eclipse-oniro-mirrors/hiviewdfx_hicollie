@@ -97,7 +97,6 @@ constexpr uint32_t FOUNDATION_UID = 5523;
 constexpr uint32_t MEDIA_SERVICE_UID = 1013;
 #endif
 constexpr int SERVICE_WARNING = 1;
-constexpr const char* KICK_WATCHDOG_TASK = "Kick_Watchdog_Task";
 constexpr const char* SYS_KERNEL_HUNGTASK_USERLIST = "/sys/kernel/hungtask/userlist";
 constexpr const char* HUNGTASK_USERLIST = "/proc/sys/hguard/user_list";
 constexpr const char* ON_KICK_TIME = "on,72";

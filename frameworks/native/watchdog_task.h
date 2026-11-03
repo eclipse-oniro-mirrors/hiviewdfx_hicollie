@@ -90,6 +90,7 @@ public:
 #endif
 
 #ifdef LOW_MEMORY_FREEZE_STRATEGY_ENABLE
+    void UpdateLowMemoryTime(uint64_t now);
     bool ShouldCheckLowMemory();
     bool ShouldSkipExitForLowMemory();
     bool ShouldSkipSendEventForLowMemory();
