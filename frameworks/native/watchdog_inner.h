@@ -164,6 +164,7 @@ private:
 #if defined(__aarch64__)
     void InitAsyncStackIfNeed();
     bool NeedOpenAsyncStack();
+    void InitUnwindIfNeed();
 #endif
     void InitDefaultTask();
     bool CheckTaskValid(int duration, int interval, int& targetCount, std::string& result);

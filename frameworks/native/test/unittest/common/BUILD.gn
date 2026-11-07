@@ -282,6 +282,25 @@ ohos_unittest("XCollieFfrtTaskTest") {
   }
 }
 
+ohos_unittest("WatchdogSanitizerUnwindTest") {
+  module_out_path = module_output_path
+  sources = [ "watchdog_sanitizer_unwind_test.cpp" ]
+ 
+  configs = [ ":module_private_config" ]
+ 
+  deps = [ "//base/hiviewdfx/hicollie/frameworks/native:libhicollie_source" ]
+ 
+  external_deps = [
+    "c_utils:utils",
+    "faultloggerd:libbacktrace_local",
+    "faultloggerd:libunwinder",
+    "ffrt:libffrt",
+    "googletest:gtest_main",
+    "hilog:libhilog",
+    "hisysevent:libhisysevent",
+  ]
+}
+
 ohos_unittest("XcollieMgrTest") {
   module_out_path = module_output_path
   sources = [ "xcollie_mgr_test.cpp" ]
@@ -310,6 +329,7 @@ group("unittest") {
     ":WatchdogInnerUnitTest",
     ":WatchdogTaskTest",
     ":WatchdogUnitTest",
+    ":WatchdogSanitizerUnwindTest",
     ":XCollieFfrtTaskTest",
     ":XCollieUnitTest",
     ":IpcFullUnitTest",

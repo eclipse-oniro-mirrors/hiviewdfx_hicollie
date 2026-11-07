@@ -44,6 +44,7 @@
 #include "sample_stack_map.h"
 #include "xcollie_ffrt_task.h"
 #include "event_handler.h"
+#include "watchdog_sanitizer_unwind.h"
 
 typedef void(*ThreadInfoCallBack)(char* buf, size_t len, void* ucontext);
 extern "C" void SetThreadInfoCallback(ThreadInfoCallBack func) __attribute__((weak));
@@ -613,6 +614,14 @@ void WatchdogInner::InitAsyncStackIfNeed()
         }
         XCOLLIE_LOGI("Finish init Async Stack.");
     });
+}
+
+void WatchdogInner::InitUnwindIfNeed()
+{
+    InitAsyncStackIfNeed();
+    InitFpBacktraceAndStitch();
+    InitGwpAsanUnwinderIfNeed(bundleName_);
+    InitXsansUnwindIfNeed(bundleName_);
 }
 #endif
 
@@ -1552,7 +1561,7 @@ bool WatchdogInner::Start()
             __set_hook_flag(false);
         }
 #if defined(__aarch64__)
-        InitAsyncStackIfNeed();
+        InitUnwindIfNeed();
 #endif
         uint64_t now = GetCurrentTickMillseconds();
         WatchdogTask task;
