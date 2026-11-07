@@ -202,10 +202,6 @@ bool DwarfXsanFuncPtr(void** buffer, int maxDepth, int* realDepth)
         } else {
             numFrames = syncCount;
         }
-    } else {
-        int fpDepth = 0;
-        FpXsanFuncPtr(nullptr, buffer, maxDepth, &fpDepth);
-        numFrames = static_cast<size_t>(fpDepth);
     }
     *realDepth = static_cast<int>(numFrames);
     return numFrames > 0;
