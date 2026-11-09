@@ -44,7 +44,7 @@ constexpr size_t STACK_RANGE = 4096;
 
 int FakeRegisterUnwinder(const SanitizerUnwindCallbacks* callbacks)
 {
-    if (callbacks == nullptr || callbacks->struct_size == 0) {
+    if (callbacks == nullptr || callbacks->structSize == 0) {
         return SANITIZER_UNWIND_REGISTER_INVALID_ARGUMENT;
     }
     return SANITIZER_UNWIND_REGISTER_OK;
