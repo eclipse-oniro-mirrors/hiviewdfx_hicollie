@@ -36,6 +36,7 @@ ohos_moduletest("XCollieTimeoutModuleTest") {
   sources = [
     "${hicollie_part_path}/frameworks/native/watchdog_inner.cpp",
     "${hicollie_part_path}/frameworks/native/watchdog_task.cpp",
+    "${hicollie_part_path}/frameworks/native/watchdog_sanitizer_unwind.cpp",
     "${hicollie_part_path}/frameworks/native/xcollie_utils.cpp",
     "xcollie_timeout_test.cpp",
   ]
@@ -46,6 +47,8 @@ ohos_moduletest("XCollieTimeoutModuleTest") {
 
   external_deps = [
     "c_utils:utils",
+    "faultloggerd:libbacktrace_local",
+    "faultloggerd:libunwinder",
     "googletest:gtest_main",
     "hilog:libhilog",
   ]

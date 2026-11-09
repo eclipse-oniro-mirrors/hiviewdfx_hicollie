@@ -3,6 +3,7 @@
   extern "C" {
         SetTimerRust;
         CancelTimerRust;
+        RegisterXsansUnwindCallbacks;
     };
     extern "C++" {
         "OHOS::HiviewDFX::XCollie::SetTimer(std::__h::basic_string<char, std::__h::char_traits<char>, std::__h::allocator<char>> const&, unsigned int, std::__h::function<void (void*)>, void*, unsigned int)";
