@@ -46,6 +46,7 @@ using GetPcsByStackIdFn = bool (*)(uint64_t, void**, size_t);
 using StitchSyncAndAsyncFn = size_t (*)(size_t*, size_t, size_t);
 using StitchXsansAsyncFn = size_t (*)(void**, size_t, size_t);
 using DfxXsanRegisterUnwinderFn = int (*)(const SanitizerUnwindCallbacks*);
+using SanitizerDwarfUnwindFn = bool (*)(void**, size_t, size_t*);
 
 #if defined(__aarch64__)
 /**

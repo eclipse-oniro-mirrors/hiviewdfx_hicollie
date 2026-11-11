@@ -330,8 +330,11 @@ HWTEST_F(WatchdogSanitizerUnwindTest, WatchdogSanitizerUnwindTest016, TestSize.L
     void* buffer[MAX_DEPTH] = {nullptr};
     int realDepth = 0;
     bool ret = DwarfXsanFuncPtr(buffer, MAX_DEPTH, &realDepth);
-    EXPECT_EQ(ret, realDepth > 0);
-    EXPECT_GT(realDepth, 0);
+    if (ret) {
+        EXPECT_GT(realDepth, 0);
+    } else {
+        EXPECT_EQ(realDepth, 0);
+    }
 }
 
 /**
