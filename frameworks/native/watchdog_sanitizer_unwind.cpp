@@ -23,7 +23,6 @@
 #include <string>
 
 #include "fp_backtrace.h"
-#include "unwinder.h"
 #include "xcollie_utils.h"
 
 namespace OHOS {
@@ -39,7 +38,22 @@ std::unique_ptr<OHOS::HiviewDFX::FpBacktrace> g_fpBacktraceOwner = nullptr;
 std::atomic<OHOS::HiviewDFX::FpBacktrace*> g_fpBacktrace{nullptr};
 std::atomic<StitchXsansAsyncFn> g_stitchXsansAsyncFn{nullptr};
 std::atomic<DfxXsanRegisterUnwinderFn> g_xsanRegisterUnwinder{nullptr};
-} // namespace
+std::atomic<SanitizerDwarfUnwindFn> g_sanitizerDwarfUnwind{nullptr};
+}
+
+void LoadSanitizerDwarfUnwind()
+{
+    static std::once_flag onceFlag;
+    std::call_once(onceFlag, [] {
+        auto fn = reinterpret_cast<SanitizerDwarfUnwindFn>(
+            dlsym(RTLD_DEFAULT, "SanitizerDwarfUnwind"));
+        if (fn == nullptr) {
+            XCOLLIE_LOGE("Failed to dlsym SanitizerDwarfUnwind.");
+            return;
+        }
+        g_sanitizerDwarfUnwind.store(fn, std::memory_order_release);
+    });
+}
 
 void LoadStitchFunc()
 {
@@ -186,15 +200,12 @@ bool DwarfXsanFuncPtr(void** buffer, int maxDepth, int* realDepth)
     size_t capacity = static_cast<size_t>(maxDepth);
     size_t maxSyncDepth = capacity;
     size_t numFrames = 0;
-    Unwinder unwinder(true);
-    if (unwinder.UnwindLocal(false, false, maxSyncDepth, 0)) {
-        const std::vector<uintptr_t>& pcs = unwinder.GetPcs();
-        size_t syncCount = pcs.size();
+    LoadSanitizerDwarfUnwind();
+    SanitizerDwarfUnwindFn dwarfUnwindFn = g_sanitizerDwarfUnwind.load(std::memory_order_acquire);
+    size_t syncCount = 0;
+    if (dwarfUnwindFn != nullptr && dwarfUnwindFn(buffer, maxSyncDepth, &syncCount)) {
         if (syncCount > capacity) {
             syncCount = capacity;
-        }
-        for (size_t i = 0; i < syncCount; ++i) {
-            buffer[i] = reinterpret_cast<void*>(pcs[i]);
         }
         StitchXsansAsyncFn stitchXsansAsync = g_stitchXsansAsyncFn.load(std::memory_order_acquire);
         if (stitchXsansAsync != nullptr) {

@@ -48,7 +48,6 @@ ohos_moduletest("XCollieTimeoutModuleTest") {
   external_deps = [
     "c_utils:utils",
     "faultloggerd:libbacktrace_local",
-    "faultloggerd:libunwinder",
     "googletest:gtest_main",
     "hilog:libhilog",
   ]

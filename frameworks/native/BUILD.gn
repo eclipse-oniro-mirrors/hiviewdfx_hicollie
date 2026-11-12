@@ -61,7 +61,6 @@ ohos_source_set("libhicollie_source") {
     "bounds_checking_function:libsec_shared",
     "c_utils:utils",
     "faultloggerd:libbacktrace_local",
-    "faultloggerd:libunwinder",
     "ffrt:libffrt",
     "hilog:libhilog",
     "hiview:libucollection_client",
