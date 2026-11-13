@@ -165,7 +165,7 @@ void InitGwpAsanUnwinderIfNeed(const std::string& bundleName)
     });
 }
 
-bool FpXsanFuncPtr(void* fp, void** buffer, int maxDepth, int* realDepth)
+__attribute__((no_sanitize("hwaddress"))) bool FpXsanFuncPtr(void* fp, void** buffer, int maxDepth, int* realDepth)
 {
     if (buffer == nullptr || maxDepth <= 0 || realDepth == nullptr) {
         return false;
@@ -188,7 +188,7 @@ bool FpXsanFuncPtr(void* fp, void** buffer, int maxDepth, int* realDepth)
     return numFrames > 0;
 }
 
-bool DwarfXsanFuncPtr(void** buffer, int maxDepth, int* realDepth)
+__attribute__((no_sanitize("hwaddress"))) bool DwarfXsanFuncPtr(void** buffer, int maxDepth, int* realDepth)
 {
     if (buffer == nullptr || maxDepth <= 0 || realDepth == nullptr) {
         return false;

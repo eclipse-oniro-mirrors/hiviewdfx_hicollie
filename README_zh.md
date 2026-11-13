@@ -1,4 +1,4 @@
-# HiCollie组件<a name="ZH-CN_TOPIC_0000001077200880"></a> 
+# HiCollie组件<a name="ZH-CN_TOPIC_0000001077200880"></a>
 
 -   [简介](#section11660541593)
 -   [系统架构](#section342962219551)
