@@ -78,7 +78,7 @@ size_t InitFpBacktraceAndStitch()
     static size_t initResult = 0;
     std::call_once(onceFlag, [] {
         g_fpBacktraceOwner = std::unique_ptr<OHOS::HiviewDFX::FpBacktrace>(
-            OHOS::HiviewDFX::FpBacktrace::CreateInstance());
+            OHOS::HiviewDFX::FpBacktrace::CreateInstance(false));
         if (g_fpBacktraceOwner != nullptr) {
             LoadStitchFunc();
             g_fpBacktrace.store(g_fpBacktraceOwner.get(), std::memory_order_release);
