@@ -125,6 +125,12 @@ size_t SlowReturnCallback(OH_HiCollie_Freeze_Type type, void* buffer, size_t siz
     int needed = snprintf_s(temp, size, size - 1, "%s", source.c_str());
     return needed;
 }
+
+size_t OversizeReturnCallback(OH_HiCollie_Freeze_Type type, void* buffer, size_t size)
+{
+    g_callbackCount++;
+    return size + 1;
+}
 }
 
 void XcollieMgrTest::SetUpTestCase(void)
@@ -381,6 +387,25 @@ HWTEST_F(XcollieMgrTest, XcollieMgrFuture_002, TestSize.Level1)
     std::string result = mgr.ReadDataFromBuffer(6);
 
     EXPECT_TRUE(result.empty());
+}
+
+/**
+ * @tc.name: XcollieMgrTest_OversizeCallback_001
+ * @tc.desc: Verify ReadDataFromBuffer returns quickly when callback size exceeds MAX_BUFFER_SIZE
+ * @tc.type: FUNC
+ */
+HWTEST_F(XcollieMgrTest, XcollieMgrTest_OversizeCallback_001, TestSize.Level1)
+{
+    XcollieMgr& mgr = XcollieMgr::GetInstance();
+    mgr.SetHandler(OversizeReturnCallback);
+
+    auto start = std::chrono::steady_clock::now();
+    std::string result = mgr.ReadDataFromBuffer(7);
+    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::steady_clock::now() - start).count();
+
+    EXPECT_TRUE(result.empty());
+    EXPECT_LT(elapsed, static_cast<int64_t>(1));
 }
 } // namespace HiviewDFX
 } // namespace OHOS

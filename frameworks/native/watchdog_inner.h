@@ -80,6 +80,7 @@ public:
     static void KillPeerBinderProcess(const std::string &description);
     bool StartScrollProfile(const TimePoint& endTime, int64_t durationTime, int sampleInterval);
     void StartProfileMainThread(const TimePoint& endTime, int64_t durationTime, int sampleInterval);
+    void RunSampleTask(int sampleInterval, int sampleCount, int64_t tid, int autoStopSampling);
     bool CollectStack(std::string& stack, std::string& heaviestStack, int treeFormat = ENABLE_TREE_FORMAT);
     bool Deinit();
     void SetBundleInfo(const std::string& bundleName, const std::string& bundleVersion);
@@ -107,7 +108,12 @@ public:
     int32_t GetReservedTimeForLogging();
 
 public:
-    std::string currentScene_;
+    static constexpr size_t CURRENT_SCENE_BUF_SIZE = 256;
+    char currentSceneBuf_[CURRENT_SCENE_BUF_SIZE] = {0};
+    std::atomic<size_t> currentSceneLen_ {0};
+    void SetCurrentScene(const char* format, ...);
+    std::mutex beginTimeMutex_;
+    std::mutex jankParamsMutex_;
     TimePoint bussinessBeginTime_;
     TimeContent timeContent_ {0};
     StackContent stackContent_;
@@ -157,6 +163,7 @@ private:
     void ReadAppStartConfig(const std::string& filePath);
     bool EnableAppStartSample(AppStartContent& startContent, int64_t durationTime, bool isScroll);
     std::string GetBundleName();
+    void GetBundleInfo(std::string& bundleName, std::string& bundleVersion);
     bool CheckSystemThread(uint32_t uid);
     bool CheckBusinessByTid(int64_t tid);
     bool CheckBusinessEmpty();
@@ -202,11 +209,13 @@ private:
     std::string heaviestStack_;
     uint64_t watchdogStartTime_ {0};
     static std::mutex threadSamplerSignalMutex_;
+    static std::atomic<SigActionType> threadSamplerSigHandlerAtomic_;
 
     bool isMainThreadStackEnabled_ {false};
     bool isMainThreadTraceEnabled_ {false};
     std::string bundleName_;
     std::string bundleVersion_;
+    std::mutex bundleMutex_;
     bool isSystemApp_ { false };
     bool isForeground_ {false};
     bool isAppDebug_ {false};

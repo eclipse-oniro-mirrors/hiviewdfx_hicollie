@@ -57,8 +57,8 @@ namespace {
 }
 
 static int32_t g_bussinessTid = 0;
-static uint32_t g_stuckTimeout = 0;
-static int64_t g_lastWatchTime = 0;
+static std::atomic<uint32_t> g_stuckTimeout {0};
+static std::atomic<int64_t> g_lastWatchTime {0};
 static std::atomic_int g_backgroundReportCount = 0;
 static int64_t g_lastWatchTimeReport3S = 0;
 static int64_t g_lastWatchTimeReport6S = 0;
@@ -128,9 +128,11 @@ bool CheckInBackGround(bool* isSixSecond)
 {
     int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::
         system_clock::now().time_since_epoch()).count();
-    if ((now - g_lastWatchTime) > (RATIO * g_stuckTimeout)) {
+    int64_t lastWatchTime = g_lastWatchTime.load(std::memory_order_acquire);
+    uint32_t stuckTimeout = g_stuckTimeout.load(std::memory_order_acquire);
+    if ((now - lastWatchTime) > (RATIO * stuckTimeout)) {
         XCOLLIE_LOGI("Update backgroundCount, currentTime: %{public}llu, lastTime: %{public}llu",
-            static_cast<unsigned long long>(now), static_cast<unsigned long long>(g_lastWatchTime));
+            static_cast<unsigned long long>(now), static_cast<unsigned long long>(lastWatchTime));
         g_backgroundReportCount.store(0);
     }
     bool inBackground = !OHOS::HiviewDFX::Watchdog::GetInstance().GetForeground();
@@ -138,30 +140,24 @@ bool CheckInBackGround(bool* isSixSecond)
     if (inBackground && g_backgroundReportCount.load() < BACKGROUND_REPORT_COUNT_MAX) {
         XCOLLIE_LOGI("In Background, not report event: g_backgroundReportCount: %{public}d, "
             "currentTime: %{public}llu, lastTime: %{public}llu", g_backgroundReportCount.load(),
-            static_cast<unsigned long long>(now), static_cast<unsigned long long>(g_lastWatchTime));
+            static_cast<unsigned long long>(now), static_cast<unsigned long long>(lastWatchTime));
         g_backgroundReportCount++;
-        g_lastWatchTime = now;
+        g_lastWatchTime.store(now, std::memory_order_release);
         return true;
     }
     return false;
 }
 
-int Report(bool* isSixSecond)
+static void BuildFaultData(AppExecFwk::FaultData& faultData, bool* isSixSecond,
+    uint32_t stuckTimeoutVal, int pid)
 {
-    if (CheckInBackGround(isSixSecond)) {
-        return 0;
-    }
-    g_backgroundReportCount++;
-
-    AppExecFwk::FaultData faultData;
     faultData.faultType = OHOS::AppExecFwk::FaultDataType::APP_FREEZE;
-    int stuckTimeout = static_cast<int>(g_stuckTimeout);
-    static int pid = getpid();
+    int stuckTimeout = static_cast<int>(stuckTimeoutVal);
     if (*isSixSecond) {
         faultData.errorObject.name = "BUSSINESS_THREAD_BLOCK_6S";
         faultData.forceExit = true;
         *isSixSecond = false;
-        stuckTimeout = static_cast<int>(g_stuckTimeout) * RATIO;
+        stuckTimeout = static_cast<int>(stuckTimeoutVal) * RATIO;
         std::string statmPath = "/proc/" + std::to_string(pid) + "/statm";
         std::string procStatm;
         if (ReadProcFileLocal(statmPath.c_str(), procStatm, PROC_BUFFER_SIZE)) {
@@ -180,20 +176,39 @@ int Report(bool* isSixSecond)
     faultData.notifyApp = false;
     faultData.waitSaveState = false;
     faultData.tid = g_bussinessTid > 0 ? g_bussinessTid : pid;
-    faultData.stuckTimeout = g_stuckTimeout;
+    faultData.stuckTimeout = stuckTimeoutVal;
+}
+
+static void UpdateLastWatchTime()
+{
+    int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::
+        system_clock::now().time_since_epoch()).count();
+    int64_t lastWatchTime = g_lastWatchTime.load(std::memory_order_acquire);
+    uint32_t stuckTimeout = g_stuckTimeout.load(std::memory_order_acquire);
+    if ((now - lastWatchTime) < 0 || (now - lastWatchTime) >= (stuckTimeout / RATIO)) {
+        XCOLLIE_LOGI("Update backgroundCount, currentTime: %{public}llu, lastTime: %{public}llu",
+            static_cast<unsigned long long>(now), static_cast<unsigned long long>(lastWatchTime));
+        g_lastWatchTime.store(now, std::memory_order_release);
+    }
+}
+
+int Report(bool* isSixSecond)
+{
+    if (CheckInBackGround(isSixSecond)) {
+        return 0;
+    }
+    g_backgroundReportCount++;
+    uint32_t stuckTimeoutVal = g_stuckTimeout.load(std::memory_order_acquire);
+    static int pid = getpid();
+    AppExecFwk::FaultData faultData;
+    BuildFaultData(faultData, isSixSecond, stuckTimeoutVal, pid);
     int type = (faultData.errorObject.name == "BUSSINESS_THREAD_BLOCK_3S") ?
         BUSINESS_THREAD_BLOCK_3S_TYPE : BUSINESS_THREAD_BLOCK_6S_TYPE;
     faultData.callbackLog = OHOS::HiviewDFX::Watchdog::GetInstance().ReadDataFromBuffer(type);
     auto result = DelayedSingleton<AppExecFwk::AppMgrClient>::GetInstance()->NotifyAppFault(faultData);
     XCOLLIE_LOGI("OH_HiCollie_Report result: %{public}d, current tid: %{public}d, timeout: %{public}u",
         result, faultData.tid, faultData.stuckTimeout);
-    int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::
-        system_clock::now().time_since_epoch()).count();
-    if ((now - g_lastWatchTime) < 0 || (now - g_lastWatchTime) >= (g_stuckTimeout / RATIO)) {
-        XCOLLIE_LOGI("Update backgroundCount, currentTime: %{public}llu, lastTime: %{public}llu",
-            static_cast<unsigned long long>(now), static_cast<unsigned long long>(g_lastWatchTime));
-        g_lastWatchTime = now;
-    }
+    UpdateLastWatchTime();
     return result;
 }
 
@@ -285,15 +300,15 @@ inline HiCollie_ErrorCode InitStuckDetection(OH_HiCollie_Task task, uint32_t tim
         return HICOLLIE_WRONG_THREAD_CONTEXT;
     }
     if (!task) {
-        OHOS::HiviewDFX::g_stuckTimeout = 0;
+        OHOS::HiviewDFX::g_stuckTimeout.store(0, std::memory_order_release);
         OHOS::HiviewDFX::g_bussinessTid = 0;
         OHOS::HiviewDFX::Watchdog::GetInstance().RemovePeriodicalTask("BussinessWatchdog");
     } else {
-        if (OHOS::HiviewDFX::g_stuckTimeout != 0) {
+        if (OHOS::HiviewDFX::g_stuckTimeout.load(std::memory_order_acquire) != 0) {
             OHOS::HiviewDFX::Watchdog::GetInstance().RemovePeriodicalTask("BussinessWatchdog");
         }
-        OHOS::HiviewDFX::g_stuckTimeout = timeout;
-        OHOS::HiviewDFX::g_lastWatchTime = 0;
+        OHOS::HiviewDFX::g_stuckTimeout.store(timeout, std::memory_order_release);
+        OHOS::HiviewDFX::g_lastWatchTime.store(0, std::memory_order_release);
         OHOS::HiviewDFX::g_backgroundReportCount.store(0);
         OHOS::HiviewDFX::g_bussinessTid = syscall(SYS_gettid);
         OHOS::HiviewDFX::Watchdog::GetInstance().RunPeriodicalTask("BussinessWatchdog", task,

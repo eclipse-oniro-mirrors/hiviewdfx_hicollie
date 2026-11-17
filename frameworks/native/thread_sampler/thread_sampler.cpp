@@ -115,7 +115,7 @@ int ThreadSampler::GetMapByPc(uintptr_t pc, std::shared_ptr<DfxMap>& map, void* 
 
 bool ThreadSampler::Init(size_t collectStackCount, bool recordSubmitterStack)
 {
-    if (init_) {
+    if (init_.load(std::memory_order_acquire)) {
         return true;
     }
 
@@ -154,7 +154,7 @@ bool ThreadSampler::Init(size_t collectStackCount, bool recordSubmitterStack)
     submitterStackIdsMaxSize_ = collectStackCount;
     recordSubmitterStack_ = recordSubmitterStack;
 
-    init_ = true;
+    init_.store(true, std::memory_order_release);
     return true;
 }
 
@@ -283,7 +283,7 @@ ThreadUnwindContext* ThreadSampler::GetWriteContext()
 NO_SANITIZER void ThreadSampler::WriteContext(void* context)
 {
 #if defined(__aarch64__) || defined(__loongarch_lp64)
-    if (!init_ || mmapStart_ == MAP_FAILED) {
+    if (!init_.load(std::memory_order_acquire) || mmapStart_ == MAP_FAILED) {
         return;
     }
     ThreadUnwindContext* contextArray = static_cast<ThreadUnwindContext*>(mmapStart_);
@@ -358,7 +358,7 @@ void ThreadSampler::SendSampleRequest()
 void ThreadSampler::ProcessStackBuffer()
 {
 #if defined(__aarch64__) || defined(__loongarch_lp64)
-    if (!init_) {
+    if (!init_.load()) {
         XCOLLIE_LOGE("sampler has not initialized.\n");
         return;
     }
@@ -407,7 +407,7 @@ void ThreadSampler::ProcessStackBuffer()
 
 int32_t ThreadSampler::Sample()
 {
-    if (!init_) {
+    if (!init_.load()) {
         XCOLLIE_LOGE("sampler has not initialized.\n");
         return -1;
     }
@@ -439,7 +439,7 @@ bool ThreadSampler::CollectStack(std::string& stack, bool treeFormat)
 {
     ProcessStackBuffer();
 
-    if (!init_) {
+    if (!init_.load()) {
         XCOLLIE_LOGE("sampler has not initialized.\n");
     }
 
@@ -495,6 +495,7 @@ std::string ThreadSampler::GetHeaviestStack() const
 
 bool ThreadSampler::Deinit()
 {
+    init_.store(false, std::memory_order_release);
     stackPrinter_.reset();
     DestroyUnwinder();
     ReleaseRecordBuffer();
@@ -504,11 +505,10 @@ bool ThreadSampler::Deinit()
     submitterStackIds_.reset();
     submitterStackIdIndex_ = 0;
     submitterStackIdsMaxSize_ = 0;
-    init_ = false;
 #if defined(CONSUME_STATISTICS)
     ResetConsumeInfo();
 #endif
-    return !init_;
+    return !init_.load();
 }
 
 SamplerResult ThreadSampler::ThreadSamplerGetResult()

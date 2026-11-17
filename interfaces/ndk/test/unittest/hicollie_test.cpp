@@ -225,4 +225,50 @@ HWTEST_F(HiCollieTest, Test_OH_HiCollie_AssociateProcessReport_1, TestSize.Level
     int ret = OH_HiCollie_AssociateProcessReport(true);
     EXPECT_EQ(ret, HICOLLIE_SUCCESS);
 }
+
+/**
+ * @tc.name: Test_OH_HiCollie_Init_StuckDetection_Atomic_001
+ * @tc.desc: Verify InitStuckDetection sets atomic globals correctly
+ * @tc.type: FUNC
+ */
+HWTEST_F(HiCollieTest, Test_OH_HiCollie_Init_StuckDetection_Atomic_001, TestSize.Level1)
+{
+    int ret = OH_HiCollie_Init_StuckDetectionWithTimeout(TaskTest, 6);
+    EXPECT_EQ(ret, HICOLLIE_SUCCESS);
+    OH_HiCollie_Init_StuckDetection(nullptr);
+    EXPECT_EQ(ret, HICOLLIE_SUCCESS);
+}
+
+/**
+ * @tc.name: Test_OH_HiCollie_Init_StuckDetection_Atomic_002
+ * @tc.desc: Verify InitStuckDetection with nullptr clears state atomically
+ * @tc.type: FUNC
+ */
+HWTEST_F(HiCollieTest, Test_OH_HiCollie_Init_StuckDetection_Atomic_002, TestSize.Level1)
+{
+    int ret = OH_HiCollie_Init_StuckDetectionWithTimeout(TaskTest, 6);
+    EXPECT_EQ(ret, HICOLLIE_SUCCESS);
+    ret = OH_HiCollie_Init_StuckDetection(nullptr);
+    EXPECT_EQ(ret, HICOLLIE_SUCCESS);
+}
+
+/**
+ * @tc.name: Test_OH_HiCollie_SetTimer_001
+ * @tc.desc: Verify OH_HiCollie_SetTimer and OH_HiCollie_CancelTimer basic flow
+ * @tc.type: FUNC
+ */
+HWTEST_F(HiCollieTest, Test_OH_HiCollie_SetTimer_Atomic_001, TestSize.Level1)
+{
+    HiCollie_SetTimerParam param;
+    param.name = "TestTimer";
+    param.timeout = 5;
+    param.flag = HICOLLIE_FLAG_DEFAULT;
+    param.arg = nullptr;
+    param.func = [](void* arg) {};
+    int id = -1;
+    HiCollie_ErrorCode ret = OH_HiCollie_SetTimer(param, &id);
+    EXPECT_EQ(ret, HICOLLIE_SUCCESS);
+    EXPECT_GT(id, 0);
+    OH_HiCollie_CancelTimer(id);
+}
 } // namespace

@@ -54,10 +54,8 @@ const int32_t APP_MIN_UID = 20000;
 const uint64_t START_TIME_INDEX = 21;
 const int START_PATH_LEN = 128;
 constexpr int64_t MAX_TIME_BUFF = 64;
-constexpr int64_t SEC_TO_MILLISEC = 1000;
 constexpr int64_t SEC_TO_NANOSEC = 1000000000;
 constexpr size_t MICROSEC_DIGIT_COUNT = 6;
-constexpr int64_t MINUTE_TO_S = 60; // 60s
 constexpr size_t TOTAL_HALF = 2; // 2 : remove half of the total
 constexpr size_t DEFAULT_LOGSTORE_MIN_KEEP_FILE_COUNT = 100;
 constexpr mode_t DEFAULT_LOG_DIR_MODE = 0770;
@@ -864,53 +862,44 @@ int64_t GetProcessLifeTime(int32_t pid, int64_t tid)
     return startTime / clockTicks;
 }
 
-std::map<std::string, int> GetReportTimesMap()
+const std::map<std::string, int>& GetReportTimesMap()
 {
-    std::map<std::string, int> keyValueMap;
-    std::string reportTimes = system::GetParameter(KEY_REPORT_TIMES_TYPE, "");
-    XCOLLIE_LOGD("get reporttimes value is %{public}s.", reportTimes.c_str());
-    std::string::size_type start = 0;
-    while (start < reportTimes.size()) {
-        std::string::size_type semicolonPos = reportTimes.find(';', start);
-        std::string line = reportTimes.substr(start,
-            (semicolonPos == std::string::npos ? reportTimes.size() : semicolonPos) - start);
-        start = (semicolonPos == std::string::npos ? reportTimes.size() : semicolonPos + 1);
-        if (line.empty()) {
-            continue;
+    static const std::map<std::string, int> keyValueMap = [] {
+        std::map<std::string, int> map;
+        std::string reportTimes = system::GetParameter(KEY_REPORT_TIMES_TYPE, "");
+        XCOLLIE_LOGD("get reporttimes value is %{public}s.", reportTimes.c_str());
+        std::string::size_type start = 0;
+        while (start < reportTimes.size()) {
+            std::string::size_type semicolonPos = reportTimes.find(';', start);
+            std::string line = reportTimes.substr(start,
+                (semicolonPos == std::string::npos ? reportTimes.size() : semicolonPos) - start);
+            start = (semicolonPos == std::string::npos ? reportTimes.size() : semicolonPos + 1);
+            if (line.empty()) {
+                continue;
+            }
+            std::string key;
+            std::string value;
+            if (!GetKeyValueByStr(line, key, value, ':')) {
+                XCOLLIE_LOGE("Parse param failed, key:%{public}s value:%{public}s",
+                    key.c_str(), value.c_str());
+                continue;
+            }
+            long long num = std::stoll(value);
+            if (num < INT32_MIN) {
+                XCOLLIE_LOGE("Value below int range, key: %{public}s, invalid value: %{public}lld",
+                    key.c_str(), num);
+                map[key] = INT32_MIN;
+            } else if (num > INT32_MAX) {
+                XCOLLIE_LOGE("Value above int range, key: %{public}s, invalid value: %{public}lld",
+                    key.c_str(), num);
+                map[key] = INT32_MAX;
+            } else {
+                map[key] = static_cast<int32_t>(num);
+            }
         }
-        std::string key;
-        std::string value;
-        if (!GetKeyValueByStr(line, key, value, ':')) {
-            XCOLLIE_LOGE("Parse param failed, key:%{public}s value:%{public}s",
-                key.c_str(), value.c_str());
-            continue;
-        }
-        long long num = std::stoll(value);
-        if (num < INT32_MIN) {
-            XCOLLIE_LOGE("Value below int range, key: %{public}s, invalid value: %{public}lld",
-                key.c_str(), num);
-            keyValueMap[key] = INT32_MIN;
-        } else if (num > INT32_MAX) {
-            XCOLLIE_LOGE("Value above int range, key: %{public}s, invalid value: %{public}lld",
-                key.c_str(), num);
-            keyValueMap[key] = INT32_MAX;
-        } else {
-            keyValueMap[key] = static_cast<int32_t>(num);
-        }
-    }
+        return map;
+    }();
     return keyValueMap;
-}
-
-void UpdateReportTimes(const std::string& bundleName, int32_t& times, int32_t& checkInterval)
-{
-    std::map<std::string, int> keyValueMap = GetReportTimesMap();
-    auto it = keyValueMap.find(bundleName);
-    if (it != keyValueMap.end()) {
-        times = it->second / MINUTE_TO_S;
-        checkInterval = MINUTE_TO_S * SEC_TO_MILLISEC;
-        XCOLLIE_LOGI("get reportTimes value is %{public}d, checkInterval is %{public}d.",
-            times, checkInterval);
-    }
 }
 
 bool IsNum(const std::string& str)

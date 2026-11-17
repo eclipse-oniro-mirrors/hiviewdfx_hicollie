@@ -67,6 +67,37 @@ bool XcollieMgr::CheckCallDuration(int type)
     return false;
 }
 
+void XcollieMgr::NotifyReady(std::shared_ptr<SharedState> state)
+{
+    {
+        std::lock_guard<std::mutex> innerLock(state->cvMutex);
+        state->ready = true;
+    }
+    state->cv.notify_one();
+}
+
+void XcollieMgr::RunFreezeCallback(std::shared_ptr<SharedState> state,
+    OH_HiCollie_FreezeCallback handler, int type)
+{
+    size_t mmapSize = OHOS::HiviewDFX::MAX_BUFFER_SIZE;
+    void* mptr = mmap(nullptr, mmapSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (mptr == MAP_FAILED) {
+        XCOLLIE_LOGE("mmap failed! errno:%{public}d", errno);
+        NotifyReady(state);
+        return;
+    }
+    size_t callbackSize = handler((OH_HiCollie_Freeze_Type)type, mptr, OHOS::HiviewDFX::MAX_BUFFER_SIZE);
+    if (callbackSize > OHOS::HiviewDFX::MAX_BUFFER_SIZE) {
+        XCOLLIE_LOGW("callback size over 64KB size:%{public}zu", callbackSize);
+        munmap(mptr, mmapSize);
+        NotifyReady(state);
+        return;
+    }
+    state->result = (char*)mptr;
+    munmap(mptr, mmapSize);
+    NotifyReady(state);
+}
+
 std::string XcollieMgr::ReadDataFromBuffer(int type)
 {
     if (type < 0 || type >= COUNT_OF_FAULT_TYPE) {
@@ -87,34 +118,10 @@ std::string XcollieMgr::ReadDataFromBuffer(int type)
         return "";
     }
     auto state = std::make_shared<SharedState>();
-    std::thread worker([state, handler, type]() {
-        size_t mmapSize = OHOS::HiviewDFX::MAX_BUFFER_SIZE;
-        void* mptr = mmap(nullptr, mmapSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-        if (mptr == MAP_FAILED) {
-            XCOLLIE_LOGE("mmap failed! errno:%{public}d", errno);
-            {
-                std::lock_guard<std::mutex> innerLock(state->cvMutex);
-                state->ready = true;
-            }
-            state->cv.notify_one();
-            return;
-        }
-        size_t callbackSize = handler((OH_HiCollie_Freeze_Type)type, mptr, OHOS::HiviewDFX::MAX_BUFFER_SIZE);
-        if (callbackSize > OHOS::HiviewDFX::MAX_BUFFER_SIZE) {
-            XCOLLIE_LOGW("callback size over 64KB size:%{public}zu", callbackSize);
-            munmap(mptr, mmapSize);
-            return;
-        }
-        state->result = (char*)mptr;
-        munmap(mptr, mmapSize);
-        {
-            std::lock_guard<std::mutex> innerLock(state->cvMutex);
-            state->ready = true;
-        }
-        state->cv.notify_one();
-    });
+    std::thread worker(&XcollieMgr::RunFreezeCallback, state, handler, type);
     std::unique_lock<std::mutex> lock(state->cvMutex);
-    if (!state->cv.wait_for(lock, std::chrono::seconds(CALLBACK_WAIT_TIME), [&]() { return state->ready; })) {
+    if (!state->cv.wait_for(lock, std::chrono::seconds(CALLBACK_WAIT_TIME),
+        [&]() { return state->ready; })) {
         XCOLLIE_LOGE("freeze callback timeout!");
         worker.detach();
         return "";

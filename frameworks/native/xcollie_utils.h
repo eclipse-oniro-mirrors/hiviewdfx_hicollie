@@ -186,9 +186,7 @@ bool IsOversea();
 
 std::string GetBinderInfoString(int32_t pid, int32_t tid, std::string& rawBinderInfo);
 
-std::map<std::string, int> GetReportTimesMap();
-
-void UpdateReportTimes(const std::string& bundleName, int32_t& times, int32_t& checkInterval);
+const std::map<std::string, int>& GetReportTimesMap();
 
 bool SaveStringToFile(const std::string& path, const std::string& content);
 

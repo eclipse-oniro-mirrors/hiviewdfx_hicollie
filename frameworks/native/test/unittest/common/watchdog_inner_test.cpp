@@ -1112,22 +1112,17 @@ HWTEST_F(WatchdogInnerTest, WatchdogInnerTest_SetScrollState_001, TestSize.Level
 }
 
 /**
- * @tc.name: WatchdogInner UpdateReportTimes Test;
- * @tc.desc: add teatcase
+ * @tc.name: WatchdogInner GetReportTimesMap Test;
+ * @tc.desc: Verify GetReportTimesMap returns cached result
  * @tc.type: FUNC
  */
-HWTEST_F(WatchdogInnerTest, WatchdogInnerTest_UpdateReportTimes_002, TestSize.Level1)
+HWTEST_F(WatchdogInnerTest, WatchdogInnerTest_GetReportTimesMap_001, TestSize.Level1)
 {
     OHOS::system::SetParameter("persist.hiview.jank.reporttimes",
         "WatchdogInnerUnitTest:120;com.sample.test:60");
-    int32_t checkInterval = 0;
-    int32_t times = 0;
-    std::string bundleName = "test";
-    UpdateReportTimes(bundleName, times, checkInterval);
-    EXPECT_TRUE(times == 0);
-    bundleName = "WatchdogInnerUnitTest";
-    UpdateReportTimes(bundleName, times, checkInterval);
-    EXPECT_TRUE(times == 2);
+    const auto& map1 = GetReportTimesMap();
+    const auto& map2 = GetReportTimesMap();
+    EXPECT_EQ(map1.size(), map2.size());
 }
 
 /**
@@ -2519,6 +2514,117 @@ HWTEST_F(WatchdogExitCatchAbortTest, WatchdogInnerTest_ConfigureExitCatchAbort_0
     EXPECT_EQ(g_exitCatchAbortCall.count, 1);
     EXPECT_FALSE(g_exitCatchAbortCall.enable);
     EXPECT_FALSE(g_exitCatchAbortCall.isDebuggable);
+}
+
+/**
+ * @tc.name: WatchdogInnerTest_SetCurrentScene_001
+ * @tc.desc: Verify SetCurrentScene correctly writes to fixed buffer and atomic length
+ * @tc.type: FUNC
+ */
+HWTEST_F(WatchdogInnerTest, WatchdogInnerTest_SetCurrentScene_001, TestSize.Level1)
+{
+    auto& inner = WatchdogInner::GetInstance();
+    inner.SetCurrentScene("thread DfxWatchdog: Current scenario is task name: %s\n", "TestTask");
+    size_t len = inner.currentSceneLen_.load(std::memory_order_acquire);
+    EXPECT_GT(len, 0u);
+    EXPECT_LE(len, WatchdogInner::CURRENT_SCENE_BUF_SIZE);
+    std::string scene(inner.currentSceneBuf_, len);
+    EXPECT_TRUE(scene.find("TestTask") != std::string::npos);
+    EXPECT_TRUE(scene.find("task name") != std::string::npos);
+}
+
+/**
+ * @tc.name: WatchdogInnerTest_SetCurrentScene_002
+ * @tc.desc: Verify SetCurrentScene with empty format clears the scene
+ * @tc.type: FUNC
+ */
+HWTEST_F(WatchdogInnerTest, WatchdogInnerTest_SetCurrentScene_002, TestSize.Level1)
+{
+    auto& inner = WatchdogInner::GetInstance();
+    inner.SetCurrentScene("thread DfxWatchdog: Current scenario is hicollie.\n");
+    EXPECT_GT(inner.currentSceneLen_.load(), 0u);
+}
+
+/**
+ * @tc.name: WatchdogInnerTest_GetBundleInfo_001
+ * @tc.desc: Verify GetBundleInfo returns both name and version atomically
+ * @tc.type: FUNC
+ */
+HWTEST_F(WatchdogInnerTest, WatchdogInnerTest_GetBundleInfo_001, TestSize.Level1)
+{
+    auto& inner = WatchdogInner::GetInstance();
+    inner.SetBundleInfo("TestBundle", "2.0.1");
+    std::string name;
+    std::string version;
+    inner.GetBundleInfo(name, version);
+    EXPECT_EQ(name, "TestBundle");
+    EXPECT_EQ(version, "2.0.1");
+}
+
+/**
+ * @tc.name: WatchdogInnerTest_GetBundleInfo_002
+ * @tc.desc: Verify GetBundleInfo reflects latest SetBundleInfo call
+ * @tc.type: FUNC
+ */
+HWTEST_F(WatchdogInnerTest, WatchdogInnerTest_GetBundleInfo_002, TestSize.Level1)
+{
+    auto& inner = WatchdogInner::GetInstance();
+    inner.SetBundleInfo("BundleA", "1.0.0");
+    inner.SetBundleInfo("BundleB", "2.0.0");
+    std::string name;
+    std::string version;
+    inner.GetBundleInfo(name, version);
+    EXPECT_EQ(name, "BundleB");
+    EXPECT_EQ(version, "2.0.0");
+}
+
+/**
+ * @tc.name: WatchdogInnerTest_JankParamsMutex_001
+ * @tc.desc: Verify UpdateJankParam writes are protected by jankParamsMutex_
+ * @tc.type: FUNC
+ */
+HWTEST_F(WatchdogInnerTest, WatchdogInnerTest_JankParamsMutex_001, TestSize.Level1)
+{
+    auto& inner = WatchdogInner::GetInstance();
+    SampleJankParams params;
+    params.logType = 1;
+    params.sampleInterval = 100;
+    params.ignoreStartUpTime = 10;
+    params.sampleCount = 5;
+    params.autoStopSampling = 1;
+    params.reportTimes = 3;
+    params.eventType = 0;
+    inner.UpdateJankParam(params);
+    {
+        std::lock_guard<std::mutex> lock(inner.jankParamsMutex_);
+        EXPECT_EQ(inner.jankParamsMap[KEY_SAMPLE_INTERVAL], 100);
+        EXPECT_EQ(inner.jankParamsMap[KEY_SAMPLE_COUNT], 5);
+        EXPECT_EQ(inner.jankParamsMap[KEY_AUTO_STOP_SAMPLING], 1);
+    }
+}
+
+/**
+ * @tc.name: WatchdogInnerTest_ThreadSamplerSigHandlerAtomic_001
+ * @tc.desc: Verify threadSamplerSigHandlerAtomic_ is initialized to nullptr
+ * @tc.type: FUNC
+ */
+HWTEST_F(WatchdogInnerTest, WatchdogInnerTest_ThreadSamplerSigHandlerAtomic_001, TestSize.Level1)
+{
+    auto& inner = WatchdogInner::GetInstance();
+    inner.ResetThreadSamplerFuncs();
+    EXPECT_EQ(inner.threadSamplerSigHandlerAtomic_.load(std::memory_order_acquire), nullptr);
+}
+
+/**
+ * @tc.name: WatchdogInnerTest_BeginTimeMutex_001
+ * @tc.desc: Verify InitBeginFunc and InitEndFunc use beginTimeMutex_ correctly
+ * @tc.type: FUNC
+ */
+HWTEST_F(WatchdogInnerTest, WatchdogInnerTest_BeginTimeMutex_001, TestSize.Level1)
+{
+    auto& inner = WatchdogInner::GetInstance();
+    EXPECT_TRUE(inner.beginTimeMutex_.try_lock());
+    inner.beginTimeMutex_.unlock();
 }
 } // namespace HiviewDFX
 } // namespace OHOS

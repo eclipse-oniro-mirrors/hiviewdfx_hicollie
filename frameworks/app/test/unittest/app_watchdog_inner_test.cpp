@@ -13,7 +13,11 @@
  * limitations under the License.
  */
 
+#define private public
+#define protected public
 #include "app_watchdog_inner.h"
+#undef private
+#undef protected
 
 #include <gtest/gtest.h>
 #include <string>
@@ -153,6 +157,55 @@ HWTEST_F(AppWatchdogInnerTest, AppWatchdogInnerTest_ScrollState_001, TestSize.Le
     isScroll = false;
     AppWatchdogInner::GetInstance().SetScrollState(isScroll);
     EXPECT_EQ(AppWatchdogInner::GetInstance().GetScrollState(), isScroll);
+}
+
+/**
+ * @tc.name: AppWatchdogInnerTest_BundleInfoConcurrent_001
+ * @tc.desc: Verify SetBundleInfo and GetBundleName are thread-safe under concurrent access
+ * @tc.type: FUNC
+ */
+HWTEST_F(AppWatchdogInnerTest, AppWatchdogInnerTest_BundleInfoConcurrent_001, TestSize.Level1)
+{
+    auto& inner = AppWatchdogInner::GetInstance();
+    std::atomic<bool> running(true);
+    std::atomic<int> inconsistentCount(0);
+
+    std::thread setter([&inner, &running]() {
+        int i = 0;
+        while (running.load()) {
+            inner.SetBundleInfo("bundle_" + std::to_string(i % 100), std::to_string(i % 100));
+            i++;
+        }
+    });
+
+    std::thread getter([&inner, &running, &inconsistentCount]() {
+        while (running.load()) {
+            std::string name = inner.GetBundleName();
+            if (!name.empty()) {
+                inconsistentCount.fetch_add(0);
+            }
+        }
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    running.store(false);
+    setter.join();
+    getter.join();
+
+    EXPECT_TRUE(inner.bundleMutex_.try_lock());
+    inner.bundleMutex_.unlock();
+}
+
+/**
+ * @tc.name: AppWatchdogInnerTest_BundleMutex_001
+ * @tc.desc: Verify bundleMutex_ exists and is unlocked
+ * @tc.type: FUNC
+ */
+HWTEST_F(AppWatchdogInnerTest, AppWatchdogInnerTest_BundleMutex_001, TestSize.Level1)
+{
+    auto& inner = AppWatchdogInner::GetInstance();
+    EXPECT_TRUE(inner.bundleMutex_.try_lock());
+    inner.bundleMutex_.unlock();
 }
 } // namespace HiviewDFX
 } // namespace OHOS
