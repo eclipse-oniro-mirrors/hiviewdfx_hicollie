@@ -363,6 +363,7 @@ void WatchdogTask::ParseTidFromMsg(const std::string& sendMsg)
 {
     constexpr char tidFrontStr[] = "Thread ID = ";
     constexpr char tidRearStr[] = ") is running";
+
     size_t frontPos = sendMsg.find(tidFrontStr);
     if (frontPos == std::string::npos) {
         return;
