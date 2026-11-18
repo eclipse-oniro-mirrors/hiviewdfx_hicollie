@@ -29,7 +29,6 @@ namespace OHOS {
 namespace HiviewDFX {
 namespace {
 constexpr int GWP_ASAN_UNWIND_ABI_VERSION = 1;
-constexpr const char* ASYNC_STACK_LIB = "libasync_stack.z.so";
 constexpr size_t GWP_ASAN_MAX_DEPTH = 128;
 constexpr size_t ASYNC_LINK_LAYER = 1;
 constexpr size_t ASYNC_MAX_CONTENT = 16;
@@ -48,7 +47,7 @@ void LoadSanitizerDwarfUnwind()
         auto fn = reinterpret_cast<SanitizerDwarfUnwindFn>(
             dlsym(RTLD_DEFAULT, "SanitizerDwarfUnwind"));
         if (fn == nullptr) {
-            XCOLLIE_LOGE("Failed to dlsym SanitizerDwarfUnwind.");
+            XCOLLIE_LOGD("Failed to dlsym SanitizerDwarfUnwind.");
             return;
         }
         g_sanitizerDwarfUnwind.store(fn, std::memory_order_release);
@@ -57,16 +56,10 @@ void LoadSanitizerDwarfUnwind()
 
 void LoadStitchFunc()
 {
-    void* asyncStackLibHandle = dlopen(ASYNC_STACK_LIB, RTLD_LAZY);
-    if (asyncStackLibHandle == nullptr) {
-        XCOLLIE_LOGE("Failed to dlopen %{public}s.", ASYNC_STACK_LIB);
-        return;
-    }
     auto stitchXsansAsync = reinterpret_cast<StitchXsansAsyncFn>(
-        dlsym(asyncStackLibHandle, "StitchXsansAsyncStacks"));
+        dlsym(RTLD_DEFAULT, "StitchXsansAsyncStacks"));
     if (stitchXsansAsync == nullptr) {
-        XCOLLIE_LOGE("Failed to dlsym stitch functions.");
-        dlclose(asyncStackLibHandle);
+        XCOLLIE_LOGD("Failed to dlsym StitchXsansAsyncStacks.");
         return;
     }
     g_stitchXsansAsyncFn.store(stitchXsansAsync, std::memory_order_release);
@@ -234,7 +227,7 @@ extern "C" int RegisterXsansUnwindCallbacks(DfxXsanRegisterUnwinderFn registerUn
         if (xsanRegisterUnwinder == nullptr) {
             // Only report when there is really no way to register; the saved
             // fallback (if any) is a legitimate path and must not look like an error.
-            XCOLLIE_LOGE("dlsym __sanitizer_set_unwind_callbacks failed, XSAN not enabled.");
+            XCOLLIE_LOGD("dlsym __sanitizer_set_unwind_callbacks failed, XSAN not enabled.");
             return SANITIZER_UNWIND_REGISTER_NO_CALLBACK;
         }
     }
