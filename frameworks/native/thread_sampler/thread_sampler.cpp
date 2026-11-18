@@ -18,11 +18,13 @@
 #include <atomic>
 #include <condition_variable>
 #include <csignal>
+#include <limits>
 #include <memory>
 #include <queue>
 #include <set>
 #include <string>
 
+#include <dlfcn.h>
 #include <sys/mman.h>
 #include <sys/prctl.h>
 #include <syscall.h>
@@ -50,6 +52,9 @@ void ThreadSampler::ThreadSamplerSignalHandler(int sig, siginfo_t* si, void* con
 
 ThreadSampler::ThreadSampler()
 {
+    auto func = reinterpret_cast<ArkVmStackRangeFunc>(
+        dlsym(RTLD_DEFAULT, "ARKVM_GetCoroutineStackRange"));
+    arkVmStackRangeFunc_.store(func, std::memory_order_release);
     XCOLLIE_LOGD("Create ThreadSampler.\n");
 }
 
@@ -89,7 +94,8 @@ int ThreadSampler::AccessMem(uintptr_t addr, uintptr_t* val, void* arg)
     }
 
     *val = 0;
-    if (addr < unwindInfo->context->sp || addr + sizeof(uintptr_t) >= unwindInfo->context->sp + STACK_BUFFER_SIZE) {
+    if (addr < unwindInfo->context->sp ||
+        addr + sizeof(uintptr_t) > unwindInfo->context->sp + unwindInfo->context->copiedStackSize) {
         return ThreadSampler::GetInstance().AccessElfMem(addr, val);
     } else {
         size_t stackOffset = addr - unwindInfo->context->sp;
@@ -204,8 +210,12 @@ bool ThreadSampler::InitUnwinder()
         return false;
     }
     if (!maps_->GetStackRange(stackBegin_, stackEnd_)) {
-        XCOLLIE_LOGE("Failed to get stack range\n");
-        return false;
+        stackBegin_ = 0;
+        stackEnd_ = 0;
+        if (arkVmStackRangeFunc_.load(std::memory_order_acquire) == nullptr) {
+            XCOLLIE_LOGE("Failed to get stack range\n");
+            return false;
+        }
     }
     return true;
 }
@@ -280,6 +290,41 @@ ThreadUnwindContext* ThreadSampler::GetWriteContext()
     return &contextArray[index];
 }
 
+NO_SANITIZER bool ThreadSampler::GetCoroutineStackEnd(uintptr_t sp, uintptr_t& stackEnd)
+{
+    auto getRange = arkVmStackRangeFunc_.load(std::memory_order_acquire);
+    void* stackAddr = nullptr;
+    size_t stackSize = 0;
+    if (getRange == nullptr || getRange(&stackAddr, &stackSize) != 0 || stackAddr == nullptr) {
+        return false;
+    }
+    uintptr_t coroutineBegin = reinterpret_cast<uintptr_t>(stackAddr);
+    if (stackSize > std::numeric_limits<uintptr_t>::max() - coroutineBegin) {
+        return false;
+    }
+    uintptr_t coroutineEnd = coroutineBegin + stackSize;
+    if (sp < coroutineBegin || sp >= coroutineEnd) {
+        return false;
+    }
+    stackEnd = coroutineEnd;
+    return true;
+}
+
+NO_SANITIZER void ThreadSampler::FillContextRegs(ThreadUnwindContext& ctx, void* context)
+{
+#if defined(__aarch64__)
+    ctx.fp = static_cast<ucontext_t*>(context)->uc_mcontext.regs[RegsEnumArm64::REG_FP];
+    ctx.lr = static_cast<ucontext_t*>(context)->uc_mcontext.regs[RegsEnumArm64::REG_LR];
+    ctx.sp = static_cast<ucontext_t*>(context)->uc_mcontext.sp;
+    ctx.pc = static_cast<ucontext_t*>(context)->uc_mcontext.pc;
+#elif defined(__loongarch_lp64)
+    ctx.fp = static_cast<ucontext_t*>(context)->uc_mcontext.__gregs[RegsEnumLoongArch64::REG_FP];
+    ctx.lr = static_cast<ucontext_t*>(context)->uc_mcontext.__gregs[RegsEnumLoongArch64::REG_LOONGARCH64_R1];
+    ctx.sp = static_cast<ucontext_t*>(context)->uc_mcontext.__gregs[RegsEnumLoongArch64::REG_SP];
+    ctx.pc = static_cast<ucontext_t*>(context)->uc_mcontext.__pc;
+#endif
+}
+
 NO_SANITIZER void ThreadSampler::WriteContext(void* context)
 {
 #if defined(__aarch64__) || defined(__loongarch_lp64)
@@ -295,27 +340,20 @@ NO_SANITIZER void ThreadSampler::WriteContext(void* context)
     if (contextArray[index].snapshotTime > 0 && contextArray[index].processTime == 0) {
         return;
     }
-#if defined(__aarch64__)
-    contextArray[index].fp = static_cast<ucontext_t*>(context)->uc_mcontext.regs[RegsEnumArm64::REG_FP];
-    contextArray[index].lr = static_cast<ucontext_t*>(context)->uc_mcontext.regs[RegsEnumArm64::REG_LR];
-    contextArray[index].sp = static_cast<ucontext_t*>(context)->uc_mcontext.sp;
-    contextArray[index].pc = static_cast<ucontext_t*>(context)->uc_mcontext.pc;
-#elif defined(__loongarch_lp64)
-    contextArray[index].fp = static_cast<ucontext_t*>(context)->uc_mcontext.__gregs[RegsEnumLoongArch64::REG_FP];
-    contextArray[index].lr =
-        static_cast<ucontext_t*>(context)->uc_mcontext.__gregs[RegsEnumLoongArch64::REG_LOONGARCH64_R1];
-    contextArray[index].sp = static_cast<ucontext_t*>(context)->uc_mcontext.__gregs[RegsEnumLoongArch64::REG_SP];
-    contextArray[index].pc = static_cast<ucontext_t*>(context)->uc_mcontext.__pc;
-#endif
-    if (contextArray[index].sp < stackBegin_ || contextArray[index].sp >= stackEnd_) {
-        return;
+    FillContextRegs(contextArray[index], context);
+    uintptr_t stackEnd = stackEnd_;
+    if (contextArray[index].sp < stackBegin_ || contextArray[index].sp >= stackEnd) {
+        if (!GetCoroutineStackEnd(contextArray[index].sp, stackEnd)) {
+            return;
+        }
     }
-    uintptr_t curStackSz = stackEnd_ - contextArray[index].sp;
+    uintptr_t curStackSz = stackEnd - contextArray[index].sp;
     uintptr_t cpySz = curStackSz > STACK_BUFFER_SIZE ? STACK_BUFFER_SIZE : curStackSz;
     for (uintptr_t pos = 0; pos < cpySz; pos++) {
         reinterpret_cast<char*>(contextArray[index].buffer)[pos] =
             reinterpret_cast<const char*>(contextArray[index].sp)[pos];
     }
+    contextArray[index].copiedStackSize = cpySz;
     if (recordSubmitterStack_ && submitterStackIdIndex_ < submitterStackIdsMaxSize_) {
         submitterStackIds_[submitterStackIdIndex_] = DfxGetSubmitterStackId();
         submitterStackIdIndex_++;
