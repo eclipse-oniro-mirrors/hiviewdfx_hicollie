@@ -23,6 +23,7 @@
 #include "hicollie.h"
 namespace OHOS {
 namespace HiviewDFX {
+struct SharedState;
 class XcollieMgr : public Singleton<XcollieMgr> {
     DECLARE_SINGLETON(XcollieMgr);
 public:
@@ -31,6 +32,9 @@ public:
 
 private:
     bool CheckCallDuration(int type);
+    static void NotifyReady(std::shared_ptr<SharedState> state);
+    static void RunFreezeCallback(std::shared_ptr<SharedState> state,
+        OH_HiCollie_FreezeCallback handler, int type);
 
     std::mutex mutex_;
     std::unordered_map<int, int64_t> lastCallTime_;

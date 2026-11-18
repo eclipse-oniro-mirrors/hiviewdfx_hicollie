@@ -17,6 +17,7 @@
 #define RELIABILITY_APP_WATCHDOG_INNER_H
 
 #include <atomic>
+#include <mutex>
 #include <string>
 #include "singleton.h"
 
@@ -49,6 +50,7 @@ private:
     std::string specifiedProcessName_;
     std::string bundleName_;
     std::string bundleVersion_;
+    std::mutex bundleMutex_;
     std::atomic_bool isSystemApp_ { false };
     std::atomic_bool isForeground_ {false};
     std::atomic_bool isAppDebug_ {false};

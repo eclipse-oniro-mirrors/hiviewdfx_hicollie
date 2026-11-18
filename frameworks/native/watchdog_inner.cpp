@@ -16,6 +16,7 @@
 #include "watchdog_inner.h"
 
 #include <cerrno>
+#include <cstdarg>
 #include <climits>
 #include <cstdio>
 #include <mutex>
@@ -63,6 +64,8 @@ enum CatchLogType {
     LOGTYPE_SAMPLE_STACK = 1,
     LOGTYPE_COLLECT_TRACE = 2
 };
+constexpr int32_t MINUTE_TO_SECONDS = 60;
+constexpr int32_t SECONDS_TO_MILLISEC = 1000;
 constexpr const char* STACK_CHECKER = "ThreadSampler";
 constexpr const char* TRACE_CHECKER = "TraceCollector";
 constexpr const char* FREEZE_SAMPLE = "FreezeSampler";
@@ -158,6 +161,7 @@ static std::shared_ptr<XCollieFfrtTask> xcollieFfrtTask_ = nullptr;
 
 SigActionType WatchdogInner::threadSamplerSigHandler_ = nullptr;
 std::mutex WatchdogInner::threadSamplerSignalMutex_;
+std::atomic<SigActionType> WatchdogInner::threadSamplerSigHandlerAtomic_ {nullptr};
 
 std::atomic_bool WatchdogInner::isTestExist_ = false;
 
@@ -170,8 +174,13 @@ void ThreadInfo(char *buf  __attribute__((unused)),
         return;
     }
 
-    auto ret = memcpy_s(buf, len, WatchdogInner::GetInstance().currentScene_.c_str(),
-        WatchdogInner::GetInstance().currentScene_.size());
+    auto& inner = WatchdogInner::GetInstance();
+    size_t sceneLen = inner.currentSceneLen_.load(std::memory_order_acquire);
+    if (sceneLen == 0 || sceneLen > inner.CURRENT_SCENE_BUF_SIZE) {
+        return;
+    }
+    size_t copyLen = sceneLen < len ? sceneLen : len;
+    auto ret = memcpy_s(buf, len, inner.currentSceneBuf_, copyLen);
     if (ret != 0) {
         return;
     }
@@ -212,7 +221,26 @@ void __attribute__ ((constructor)) setup(void)
 WatchdogInner::WatchdogInner()
     : cntCallback_(0), timeCallback_(0)
 {
-    currentScene_ = "thread DfxWatchdog: Current scenario is hicollie.\n";
+    SetCurrentScene("thread DfxWatchdog: Current scenario is hicollie.\n");
+}
+
+void WatchdogInner::SetCurrentScene(const char* format, ...)
+{
+    char tempBuf[CURRENT_SCENE_BUF_SIZE] = {0};
+    va_list args;
+    va_start(args, format);
+    int ret = vsnprintf_s(tempBuf, sizeof(tempBuf), sizeof(tempBuf) - 1, format, args);
+    va_end(args);
+    if (ret <= 0) {
+        currentSceneLen_.store(0, std::memory_order_release);
+        return;
+    }
+    size_t len = static_cast<size_t>(ret);
+    if (memcpy_s(currentSceneBuf_, CURRENT_SCENE_BUF_SIZE, tempBuf, len) != EOK) {
+        currentSceneLen_.store(0, std::memory_order_release);
+        return;
+    }
+    currentSceneLen_.store(len, std::memory_order_release);
 }
 
 WatchdogInner::~WatchdogInner()
@@ -239,6 +267,7 @@ static bool IsInAppspwan()
 
 void WatchdogInner::SetBundleInfo(const std::string& bundleName, const std::string& bundleVersion)
 {
+    std::lock_guard<std::mutex> lock(bundleMutex_);
     bundleName_ = bundleName;
     bundleVersion_ = bundleVersion;
 }
@@ -255,7 +284,15 @@ bool WatchdogInner::GetSystemApp()
 
 std::string WatchdogInner::GetBundleName()
 {
+    std::lock_guard<std::mutex> lock(bundleMutex_);
     return bundleName_;
+}
+
+void WatchdogInner::GetBundleInfo(std::string& bundleName, std::string& bundleVersion)
+{
+    std::lock_guard<std::mutex> lock(bundleMutex_);
+    bundleName = bundleName_;
+    bundleVersion = bundleVersion_;
 }
 
 void WatchdogInner::SetForeground(const bool& isForeground)
@@ -294,9 +331,12 @@ bool WatchdogInner::ReportMainThreadEvent(int64_t tid, std::string eventName, bo
         return result >= 0;
     }
     if (!isScroll) {
+        std::string bundleName;
+        std::string bundleVersion;
+        GetBundleInfo(bundleName, bundleVersion);
         result = HiSysEventWrite(HiSysEvent::Domain::FRAMEWORK, "MAIN_THREAD_JANK",
             HiSysEvent::EventType::FAULT,
-            "BUNDLE_VERSION", bundleVersion_, "BUNDLE_NAME", bundleName_,
+            "BUNDLE_VERSION", bundleVersion, "BUNDLE_NAME", bundleName,
             "BEGIN_TIME", stackContent_.reportBegin / MILLISEC_TO_NANOSEC,
             "END_TIME", stackContent_.reportEnd / MILLISEC_TO_NANOSEC,
             "EXTERNAL_LOG", path, "STACK", stack, "JANK_LEVEL", 0,
@@ -332,11 +372,11 @@ bool WatchdogInner::CheckEventTimer(int64_t currentTime, int64_t reportBegin, in
 
 void WatchdogInner::ThreadSamplerSigHandler(int sig, siginfo_t* si, void* context)
 {
-    std::lock_guard<std::mutex> lock(threadSamplerSignalMutex_);
-    if (WatchdogInner::threadSamplerSigHandler_ == nullptr) {
+    SigActionType handler = threadSamplerSigHandlerAtomic_.load(std::memory_order_acquire);
+    if (handler == nullptr) {
         return;
     }
-    WatchdogInner::threadSamplerSigHandler_(sig, si, context);
+    handler(sig, si, context);
 }
 
 bool WatchdogInner::InstallThreadSamplerSignal()
@@ -357,8 +397,14 @@ bool WatchdogInner::InstallThreadSamplerSignal()
 
 void WatchdogInner::UninstallThreadSamplerSignal()
 {
-    std::lock_guard<std::mutex> lock(threadSamplerSignalMutex_);
+    sigset_t mask;
+    sigset_t oldmask;
+    sigemptyset(&mask);
+    sigaddset(&mask, MUSL_SIGNAL_SAMPLE_STACK);
+    pthread_sigmask(SIG_BLOCK, &mask, &oldmask);
+    threadSamplerSigHandlerAtomic_.store(nullptr, std::memory_order_release);
     threadSamplerSigHandler_ = nullptr;
+    pthread_sigmask(SIG_SETMASK, &oldmask, nullptr);
 }
 
 bool WatchdogInner::CheckThreadSampler(bool recordSubmitterStack)
@@ -401,6 +447,7 @@ bool WatchdogInner::InitThreadSamplerFuncs()
             reinterpret_cast<ThreadSamplerDeinitFunc>(FunctionOpen(threadSamplerFuncHandler_, "ThreadSamplerDeinit"));
         threadSamplerSigHandler_ =
             reinterpret_cast<SigActionType>(FunctionOpen(threadSamplerFuncHandler_, "ThreadSamplerSigHandler"));
+        threadSamplerSigHandlerAtomic_.store(threadSamplerSigHandler_, std::memory_order_release);
         threadSamplerGetResultFunc_ = reinterpret_cast<ThreadSamplerGetResultFunc>(
             FunctionOpen(threadSamplerFuncHandler_, "ThreadSamplerGetResult"));
         if (threadSamplerInitFunc_ == nullptr || threadSamplerSampleFunc_ == nullptr ||
@@ -424,6 +471,7 @@ void WatchdogInner::ResetThreadSamplerFuncs()
     threadSamplerCollectFunc_ = nullptr;
     threadSamplerDeinitFunc_ = nullptr;
     threadSamplerSigHandler_ = nullptr;
+    threadSamplerSigHandlerAtomic_.store(nullptr, std::memory_order_release);
     threadSamplerGetResultFunc_ = nullptr;
     dlclose(threadSamplerFuncHandler_);
     threadSamplerFuncHandler_ = nullptr;
@@ -439,7 +487,11 @@ void WatchdogInner::UpdateTime(int64_t& reportBegin, int64_t& reportEnd,
 
 int32_t WatchdogInner::GetMainThreadCheckTimer()
 {
-    int32_t checkInterval = jankParamsMap[KEY_CHECKER_INTERVAL];
+    int32_t checkInterval;
+    {
+        std::lock_guard<std::mutex> lock(jankParamsMutex_);
+        checkInterval = jankParamsMap[KEY_CHECKER_INTERVAL];
+    }
     if (checkInterval > 0) {
         return checkInterval;
     }
@@ -686,55 +738,69 @@ bool WatchdogInner::CheckSystemThread(uint32_t uid)
     return (GetSystemApp() || uid < MIN_APP_UID);
 }
 
+void WatchdogInner::RunSampleTask(int sampleInterval, int sampleCount, int64_t tid, int autoStopSampling)
+{
+    if ((stackContent_.detectorCount == 0 && stackContent_.collectCount == 0 &&
+        (g_isDumpStack || !CheckThreadSampler(false))) || threadSamplerSampleFunc_ == nullptr) {
+        isMainThreadStackEnabled_ = true;
+        return;
+    }
+    if (stackContent_.collectCount > DumpStackState::DEFAULT &&
+        stackContent_.collectCount < sampleCount) {
+        if (autoStopSampling && !CheckEventTimer(GetTimeStamp(), stackContent_.reportBegin,
+            stackContent_.reportEnd, sampleInterval)) {
+            stackContent_.collectCount = sampleCount;
+            return;
+        }
+        g_isDumpStack.store(true);
+        threadSamplerSampleFunc_();
+        stackContent_.collectCount++;
+    } else if (stackContent_.collectCount == sampleCount) {
+        g_isDumpStack.store(false);
+        std::string eventName = CheckBusinessEmpty() ? MAIN_THREAD_JANK : BUSSINESS_THREAD_JANK;
+        ReportMainThreadEvent(tid, eventName);
+        stackContent_.reportTimes--;
+        isMainThreadStackEnabled_ = true;
+        return;
+    } else {
+        if (CheckEventTimer(GetTimeStamp(), stackContent_.reportBegin,
+            stackContent_.reportEnd, sampleInterval)) {
+            threadSamplerSampleFunc_();
+            stackContent_.collectCount++;
+        } else {
+            stackContent_.detectorCount++;
+        }
+    }
+    isMainThreadStackEnabled_ = stackContent_.detectorCount == DETECT_STACK_COUNT ? true :
+        isMainThreadStackEnabled_;
+}
+
 void WatchdogInner::StartProfileMainThread(const TimePoint& endTime, int64_t durationTime, int sampleInterval)
 {
+    int sampleReportTimes;
+    int ignoreStartupTime;
+    int sampleCount;
+    int autoStopSampling;
+    {
+        std::lock_guard<std::mutex> lock(jankParamsMutex_);
+        sampleReportTimes = jankParamsMap[KEY_SAMPLE_REPORT_TIMES];
+        ignoreStartupTime = jankParamsMap[KEY_IGNORE_STARTUP_TIME];
+        sampleCount = jankParamsMap[KEY_SAMPLE_COUNT];
+        autoStopSampling = jankParamsMap[KEY_AUTO_STOP_SAMPLING];
+    }
     if ((CheckSystemThread(getuid()) && GetBundleName() != KEY_SCB_STATE) ||
         !SampleStackDetect(endTime, stackContent_.reportTimes,
-        jankParamsMap[KEY_SAMPLE_REPORT_TIMES], jankParamsMap[KEY_IGNORE_STARTUP_TIME])) {
+        sampleReportTimes, ignoreStartupTime)) {
         return;
     }
     XCOLLIE_LOGI("StartProfileMainThread durationTime: %{public}" PRId64 " ms, sampleInterval: %{public}d.",
         durationTime, sampleInterval);
     stackContent_.detectorCount = 0;
     stackContent_.collectCount = 0;
-    int sampleCount = jankParamsMap[KEY_SAMPLE_COUNT];
     int64_t tid = getproctid();
-    auto sampleTask = [this, sampleInterval, sampleCount, tid]() {
-        if ((stackContent_.detectorCount == 0 && stackContent_.collectCount == 0 &&
-            (g_isDumpStack || !CheckThreadSampler(false))) || threadSamplerSampleFunc_ == nullptr) {
-            isMainThreadStackEnabled_ = true;
-            return;
-        }
-        if (stackContent_.collectCount > DumpStackState::DEFAULT &&
-            stackContent_.collectCount < sampleCount) {
-            if (jankParamsMap[KEY_AUTO_STOP_SAMPLING] && !CheckEventTimer(GetTimeStamp(), stackContent_.reportBegin,
-                stackContent_.reportEnd, sampleInterval)) {
-                stackContent_.collectCount = sampleCount;
-                return;
-            }
-            g_isDumpStack.store(true);
-            threadSamplerSampleFunc_();
-            stackContent_.collectCount++;
-        } else if (stackContent_.collectCount == sampleCount) {
-            g_isDumpStack.store(false);
-            std::string eventName = CheckBusinessEmpty() ? MAIN_THREAD_JANK : BUSSINESS_THREAD_JANK;
-            ReportMainThreadEvent(tid, eventName);
-            stackContent_.reportTimes--;
-            isMainThreadStackEnabled_ = true;
-            return;
-        } else {
-            if (CheckEventTimer(GetTimeStamp(), stackContent_.reportBegin,
-                stackContent_.reportEnd, sampleInterval)) {
-                threadSamplerSampleFunc_();
-                stackContent_.collectCount++;
-            } else {
-                stackContent_.detectorCount++;
-            }
-        }
-        isMainThreadStackEnabled_ = stackContent_.detectorCount == DETECT_STACK_COUNT ? true :
-            isMainThreadStackEnabled_;
+    auto sampleTask = [this, sampleInterval, sampleCount, tid, autoStopSampling]() {
+        RunSampleTask(sampleInterval, sampleCount, tid, autoStopSampling);
     };
-
     std::unique_lock<std::mutex> lock(lock_);
     InsertWatchdogTaskLocked(STACK_CHECKER, WatchdogTask(STACK_CHECKER, sampleTask, 0, sampleInterval, false));
 }
@@ -761,7 +827,8 @@ std::string WatchdogInner::SaveFreezeStackToFile(int32_t pid)
         return "";
     }
     heaviestStack_ = std::move(heaviestStack);
-    std::string info = "#ThreadInfos Tid: " + std::to_string(pid) + ", Name: " + bundleName_ + "\n";
+    std::string bundleName = GetBundleName();
+    std::string info = "#ThreadInfos Tid: " + std::to_string(pid) + ", Name: " + bundleName + "\n";
     if (g_isReuseStack) {
         info += "The current thread is collecting the stack, which conflicts with the main thread jank event."
             " Reuse the current stack.";
@@ -964,8 +1031,7 @@ int32_t WatchdogInner::StartTraceProfile()
         XCOLLIE_LOGE("Create traceCollector failed.");
         return -1;
     }
-    appCaller_.bundleName = bundleName_;
-    appCaller_.bundleVersion = bundleVersion_;
+    GetBundleInfo(appCaller_.bundleName, appCaller_.bundleVersion);
     appCaller_.uid = static_cast<int64_t>(getuid());
     appCaller_.pid = getprocpid();
     appCaller_.threadName = GetSelfProcName();
@@ -1030,9 +1096,14 @@ static void DistributeEnd(const std::string& name, const TimePoint& startTime)
     if (WatchdogInner::GetInstance().CheckSample(endTime, durationTime)) {
         return;
     }
-    int sampleInterval = WatchdogInner::GetInstance().jankParamsMap[KEY_SAMPLE_INTERVAL];
+    int sampleInterval;
+    int logType;
+    {
+        std::lock_guard<std::mutex> lock(WatchdogInner::GetInstance().jankParamsMutex_);
+        sampleInterval = WatchdogInner::GetInstance().jankParamsMap[KEY_SAMPLE_INTERVAL];
+        logType = WatchdogInner::GetInstance().jankParamsMap[KEY_LOG_TYPE];
+    }
     if (duration > std::chrono::milliseconds(sampleInterval)) {
-        int logType = WatchdogInner::GetInstance().jankParamsMap[KEY_LOG_TYPE];
         switch (logType) {
             case CatchLogType::LOGTYPE_SAMPLE_STACK: {
                 WatchdogInner::GetInstance().StartProfileMainThread(endTime, durationTime, sampleInterval);
@@ -1518,7 +1589,7 @@ uint64_t WatchdogInner::FetchNextTask(uint64_t now, WatchdogTask& task)
         }
         return queuedTask.nextTickTime - now;
     }
-    currentScene_ = "thread DfxWatchdog: Current scenario is task name: " + queuedTask.name + "\n";
+    SetCurrentScene("thread DfxWatchdog: Current scenario is task name: %s\n", queuedTask.name.c_str());
     task = queuedTask;
     checkerQueue_.pop();
     return 0;
@@ -1576,7 +1647,7 @@ bool WatchdogInner::Start()
             if (!IsInSleep(task)) {
 #endif
                 task.Run(now);
-                currentScene_ = "thread DfxWatchdog: Current scenario is hicollie.\n";
+                SetCurrentScene("thread DfxWatchdog: Current scenario is hicollie.\n");
 #ifdef SUSPEND_CHECK_ENABLE
             }
 #endif
@@ -2020,13 +2091,20 @@ bool WatchdogInner::RemoveInnerTask(const std::string& name)
 void InitBeginFunc(const char* name)
 {
     std::string nameStr(name);
-    WatchdogInner::GetInstance().bussinessBeginTime_ = DistributeStart(nameStr);
+    TimePoint beginTime = DistributeStart(nameStr);
+    std::lock_guard<std::mutex> lock(WatchdogInner::GetInstance().beginTimeMutex_);
+    WatchdogInner::GetInstance().bussinessBeginTime_ = beginTime;
 }
 
 void InitEndFunc(const char* name)
 {
     std::string nameStr(name);
-    DistributeEnd(nameStr, WatchdogInner::GetInstance().bussinessBeginTime_);
+    TimePoint startTime;
+    {
+        std::lock_guard<std::mutex> lock(WatchdogInner::GetInstance().beginTimeMutex_);
+        startTime = WatchdogInner::GetInstance().bussinessBeginTime_;
+    }
+    DistributeEnd(nameStr, startTime);
 }
 
 bool WatchdogInner::CheckBusinessByTid(int64_t tid)
@@ -2088,6 +2166,9 @@ bool WatchdogInner::GetAppDebug()
 
 void WatchdogInner::UpdateJankParam(SampleJankParams& params)
 {
+    std::string bundleName = GetBundleName();
+    const auto& reportTimesMap = GetReportTimesMap();
+    std::lock_guard<std::mutex> lock(jankParamsMutex_);
     jankParamsMap[KEY_LOG_TYPE] = params.logType;
     if (params.logType == CatchLogType::LOGTYPE_COLLECT_TRACE) {
         XCOLLIE_LOGI("Set thread only dump trace success.");
@@ -2102,7 +2183,11 @@ void WatchdogInner::UpdateJankParam(SampleJankParams& params)
         if (params.eventType == AUTO_STOP_EVENT_TYPE) {
             jankParamsMap[KEY_CHECKER_INTERVAL] = AUTO_STOP_CHECKER_INTERVAL;
         } else {
-            UpdateReportTimes(bundleName_, params.reportTimes, jankParamsMap[KEY_CHECKER_INTERVAL]);
+            auto it = reportTimesMap.find(bundleName);
+            if (it != reportTimesMap.end()) {
+                params.reportTimes = it->second / MINUTE_TO_SECONDS;
+                jankParamsMap[KEY_CHECKER_INTERVAL] = MINUTE_TO_SECONDS * SECONDS_TO_MILLISEC;
+            }
         }
         jankParamsMap[KEY_SAMPLE_REPORT_TIMES] = params.reportTimes;
         stackContent_.reportTimes = params.reportTimes;

@@ -93,7 +93,7 @@ private:
     void WriteContext(void* context);
     MAYBE_UNUSED void ResetConsumeInfo();
 
-    bool init_ {false};
+    std::atomic<bool> init_ {false};
     uintptr_t stackBegin_ {0};
     uintptr_t stackEnd_ {0};
     int32_t pid_ {0};

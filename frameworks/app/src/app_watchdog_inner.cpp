@@ -38,6 +38,7 @@ int32_t AppWatchdogInner::GetReservedTimeForLogging()
 
 void AppWatchdogInner::SetBundleInfo(const std::string& bundleName, const std::string& bundleVersion)
 {
+    std::lock_guard<std::mutex> lock(bundleMutex_);
     bundleName_ = bundleName;
     bundleVersion_ = bundleVersion;
 }
@@ -74,6 +75,7 @@ bool AppWatchdogInner::GetSystemApp()
 
 std::string AppWatchdogInner::GetBundleName()
 {
+    std::lock_guard<std::mutex> lock(bundleMutex_);
     return bundleName_;
 }
 
