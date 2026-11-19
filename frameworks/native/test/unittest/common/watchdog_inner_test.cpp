@@ -988,6 +988,22 @@ HWTEST_F(WatchdogInnerTest, WatchdogInnerTest_ConfigEventPolicy_005, TestSize.Le
     paramsMap[KEY_AUTO_STOP_SAMPLING] = "test_fail";
     ret = WatchdogInner::GetInstance().ConfigEventPolicy(paramsMap);
     EXPECT_EQ(ret, -1);
+
+    /**
+     * @tc.desc: set enable_main_handler_dump invalid.
+     */
+    paramsMap[KEY_AUTO_STOP_SAMPLING] = "true";
+    paramsMap[KEY_ENABLE_MAIN_HANDLER_DUMP] = "test_fail";
+    ret = WatchdogInner::GetInstance().ConfigEventPolicy(paramsMap);
+    EXPECT_EQ(ret, -1);
+
+    /**
+     * @tc.desc: set enable_main_handler_dump valid.
+     */
+    paramsMap[KEY_ENABLE_MAIN_HANDLER_DUMP] = "true";
+    ret = WatchdogInner::GetInstance().ConfigEventPolicy(paramsMap);
+    EXPECT_EQ(ret, 0);
+    EXPECT_EQ(WatchdogInner::GetInstance().jankParamsMap[KEY_ENABLE_MAIN_HANDLER_DUMP], 1);
 }
 
 /**
@@ -1545,6 +1561,19 @@ HWTEST_F(WatchdogInnerTest, WatchdogInner_CheckSampleParam_001, TestSize.Level1)
     paramsMap[KEY_SAMPLE_REPORT_TIMES] = "2";
     ret = WatchdogInner::GetInstance().CheckSampleParam(paramsMap);
     EXPECT_TRUE(ret);
+    /**
+     * @tc.desc: set enable_main_handler_dump invalid.
+     */
+    paramsMap[KEY_ENABLE_MAIN_HANDLER_DUMP] = "invalid";
+    ret = WatchdogInner::GetInstance().CheckSampleParam(paramsMap);
+    EXPECT_TRUE(!ret);
+    /**
+     * @tc.desc: set enable_main_handler_dump valid true.
+     */
+    paramsMap[KEY_ENABLE_MAIN_HANDLER_DUMP] = "true";
+    ret = WatchdogInner::GetInstance().CheckSampleParam(paramsMap);
+    EXPECT_TRUE(ret);
+    EXPECT_EQ(WatchdogInner::GetInstance().jankParamsMap[KEY_ENABLE_MAIN_HANDLER_DUMP], 1);
 }
 
 /**
@@ -2625,6 +2654,215 @@ HWTEST_F(WatchdogInnerTest, WatchdogInnerTest_BeginTimeMutex_001, TestSize.Level
     auto& inner = WatchdogInner::GetInstance();
     EXPECT_TRUE(inner.beginTimeMutex_.try_lock());
     inner.beginTimeMutex_.unlock();
+}
+
+/**
+ * @tc.name: WatchdogInner LimitedTaskQueueDumper Test;
+ * @tc.desc: Test LimitedTaskQueueDumper counts only "No." prefixed messages as tasks
+ * @tc.type: FUNC
+ */
+HWTEST_F(WatchdogInnerTest, WatchdogInnerTest_LimitedTaskQueueDumper_001, TestSize.Level1)
+{
+    LimitedTaskQueueDumper dumper(3);
+    EXPECT_EQ(dumper.GetTaskCount(), 0);
+    EXPECT_EQ(dumper.GetQueueInfo(), "");
+
+    dumper.Dump("No.1 task name");
+    dumper.Dump("No.2 task name");
+    EXPECT_EQ(dumper.GetTaskCount(), 2);
+
+    dumper.Dump("some detail info line");
+    EXPECT_EQ(dumper.GetTaskCount(), 2);
+
+    dumper.Dump("No.3 task name");
+    EXPECT_EQ(dumper.GetTaskCount(), 3);
+
+    dumper.Dump("No.4 task name");
+    EXPECT_EQ(dumper.GetTaskCount(), 3);
+}
+
+/**
+ * @tc.name: WatchdogInner LimitedTaskQueueDumper Test;
+ * @tc.desc: Test LimitedTaskQueueDumper GetQueueInfo accumulates messages
+ * @tc.type: FUNC
+ */
+HWTEST_F(WatchdogInnerTest, WatchdogInnerTest_LimitedTaskQueueDumper_002, TestSize.Level1)
+{
+    LimitedTaskQueueDumper dumper(10);
+    dumper.Dump("No.1 task");
+    dumper.Dump("detail line");
+    std::string info = dumper.GetQueueInfo();
+    EXPECT_TRUE(info.find("No.1 task") != std::string::npos);
+    EXPECT_TRUE(info.find("detail line") != std::string::npos);
+}
+
+/**
+ * @tc.name: WatchdogInner LimitedTaskQueueDumper Test;
+ * @tc.desc: Test LimitedTaskQueueDumper GetTag returns empty string
+ * @tc.type: FUNC
+ */
+HWTEST_F(WatchdogInnerTest, WatchdogInnerTest_LimitedTaskQueueDumper_003, TestSize.Level1)
+{
+    LimitedTaskQueueDumper dumper(10);
+    EXPECT_EQ(dumper.GetTag(), "");
+}
+
+/**
+ * @tc.name: WatchdogInner LimitedTaskQueueDumper Test;
+ * @tc.desc: Test LimitedTaskQueueDumper with zero max count
+ * @tc.type: FUNC
+ */
+HWTEST_F(WatchdogInnerTest, WatchdogInnerTest_LimitedTaskQueueDumper_004, TestSize.Level1)
+{
+    LimitedTaskQueueDumper dumper(0);
+    dumper.Dump("No.1 task");
+    EXPECT_EQ(dumper.GetTaskCount(), 0);
+}
+
+/**
+ * @tc.name: WatchdogInner GetEnableMainHandlerDump Test;
+ * @tc.desc: Test GetEnableMainHandlerDump parses true/false/empty/invalid correctly
+ * @tc.type: FUNC
+ */
+HWTEST_F(WatchdogInnerTest, WatchdogInnerTest_GetEnableMainHandlerDump_001, TestSize.Level1)
+{
+    std::map<std::string, std::string> paramsMap;
+    int enableMainHandlerDump = -1;
+
+    paramsMap[KEY_ENABLE_MAIN_HANDLER_DUMP] = "true";
+    bool ret = WatchdogInner::GetInstance().GetEnableMainHandlerDump(paramsMap, enableMainHandlerDump);
+    EXPECT_TRUE(ret);
+    EXPECT_EQ(enableMainHandlerDump, 1);
+
+    enableMainHandlerDump = -1;
+    paramsMap[KEY_ENABLE_MAIN_HANDLER_DUMP] = "false";
+    ret = WatchdogInner::GetInstance().GetEnableMainHandlerDump(paramsMap, enableMainHandlerDump);
+    EXPECT_TRUE(ret);
+    EXPECT_EQ(enableMainHandlerDump, 0);
+
+    enableMainHandlerDump = -1;
+    paramsMap[KEY_ENABLE_MAIN_HANDLER_DUMP] = "";
+    ret = WatchdogInner::GetInstance().GetEnableMainHandlerDump(paramsMap, enableMainHandlerDump);
+    EXPECT_TRUE(ret);
+    EXPECT_EQ(enableMainHandlerDump, 0);
+
+    paramsMap[KEY_ENABLE_MAIN_HANDLER_DUMP] = "invalid";
+    ret = WatchdogInner::GetInstance().GetEnableMainHandlerDump(paramsMap, enableMainHandlerDump);
+    EXPECT_FALSE(ret);
+
+    paramsMap.erase(KEY_ENABLE_MAIN_HANDLER_DUMP);
+    enableMainHandlerDump = -1;
+    ret = WatchdogInner::GetInstance().GetEnableMainHandlerDump(paramsMap, enableMainHandlerDump);
+    EXPECT_TRUE(ret);
+    EXPECT_EQ(enableMainHandlerDump, 0);
+}
+
+/**
+ * @tc.name: WatchdogInner CheckSampleParam with enable_main_handler_dump Test;
+ * @tc.desc: Test CheckSampleParam stores enable_main_handler_dump in jankParamsMap
+ * @tc.type: FUNC
+ */
+HWTEST_F(WatchdogInnerTest, WatchdogInnerTest_CheckSampleParam_EnableMainHandlerDump_001, TestSize.Level1)
+{
+    std::map<std::string, std::string> paramsMap;
+    paramsMap[KEY_LOG_TYPE] = "1";
+    paramsMap[KEY_SAMPLE_INTERVAL] = "100";
+    paramsMap[KEY_IGNORE_STARTUP_TIME] = "10";
+    paramsMap[KEY_SAMPLE_COUNT] = "10";
+    paramsMap[KEY_SAMPLE_REPORT_TIMES] = "2";
+
+    paramsMap[KEY_ENABLE_MAIN_HANDLER_DUMP] = "true";
+    bool ret = WatchdogInner::GetInstance().CheckSampleParam(paramsMap);
+    EXPECT_TRUE(ret);
+    EXPECT_EQ(WatchdogInner::GetInstance().jankParamsMap[KEY_ENABLE_MAIN_HANDLER_DUMP], 1);
+
+    paramsMap[KEY_ENABLE_MAIN_HANDLER_DUMP] = "false";
+    ret = WatchdogInner::GetInstance().CheckSampleParam(paramsMap);
+    EXPECT_TRUE(ret);
+    EXPECT_EQ(WatchdogInner::GetInstance().jankParamsMap[KEY_ENABLE_MAIN_HANDLER_DUMP], 0);
+
+    paramsMap[KEY_ENABLE_MAIN_HANDLER_DUMP] = "invalid";
+    ret = WatchdogInner::GetInstance().CheckSampleParam(paramsMap);
+    EXPECT_FALSE(ret);
+}
+
+/**
+ * @tc.name: WatchdogInner ConfigEventPolicy with enable_main_handler_dump Test;
+ * @tc.desc: Test ConfigEventPolicy accepts and rejects enable_main_handler_dump values
+ * @tc.type: FUNC
+ */
+HWTEST_F(WatchdogInnerTest, WatchdogInnerTest_ConfigEventPolicy_EnableMainHandlerDump_001, TestSize.Level1)
+{
+    std::map<std::string, std::string> paramsMap;
+    paramsMap[KEY_LOG_TYPE] = "0";
+    paramsMap[KEY_AUTO_STOP_SAMPLING] = "true";
+
+    paramsMap[KEY_ENABLE_MAIN_HANDLER_DUMP] = "true";
+    int ret = WatchdogInner::GetInstance().ConfigEventPolicy(paramsMap);
+    EXPECT_EQ(ret, 0);
+    EXPECT_EQ(WatchdogInner::GetInstance().jankParamsMap[KEY_ENABLE_MAIN_HANDLER_DUMP], 1);
+
+    paramsMap[KEY_ENABLE_MAIN_HANDLER_DUMP] = "false";
+    ret = WatchdogInner::GetInstance().ConfigEventPolicy(paramsMap);
+    EXPECT_EQ(ret, 0);
+    EXPECT_EQ(WatchdogInner::GetInstance().jankParamsMap[KEY_ENABLE_MAIN_HANDLER_DUMP], 0);
+
+    paramsMap[KEY_ENABLE_MAIN_HANDLER_DUMP] = "invalid";
+    ret = WatchdogInner::GetInstance().ConfigEventPolicy(paramsMap);
+    EXPECT_EQ(ret, -1);
+}
+
+/**
+ * @tc.name: WatchdogInner DumpMainEventHandler Test;
+ * @tc.desc: Test DumpMainEventHandler only triggers for MAIN_THREAD_JANK without scroll/appStart
+ * @tc.type: FUNC
+ */
+HWTEST_F(WatchdogInnerTest, WatchdogInnerTest_DumpMainEventHandler_001, TestSize.Level1)
+{
+    auto& inner = WatchdogInner::GetInstance();
+    inner.mainRunner_ = nullptr;
+    inner.jankParamsMap[KEY_ENABLE_MAIN_HANDLER_DUMP] = 0;
+
+    std::string baseStack = "original_stack";
+
+    std::string stack = baseStack;
+    inner.DumpMainEventHandler("MAIN_THREAD_JANK", false, false, stack);
+    EXPECT_EQ(stack, baseStack);
+
+    stack = baseStack;
+    inner.DumpMainEventHandler("MAIN_THREAD_JANK", true, false, stack);
+    EXPECT_EQ(stack, baseStack);
+
+    stack = baseStack;
+    inner.DumpMainEventHandler("MAIN_THREAD_JANK", false, true, stack);
+    EXPECT_EQ(stack, baseStack);
+
+    stack = baseStack;
+    inner.DumpMainEventHandler("OTHER_EVENT", false, false, stack);
+    EXPECT_EQ(stack, baseStack);
+}
+
+/**
+ * @tc.name: WatchdogInner DumpMainEventHandler Test;
+ * @tc.desc: Test DumpMainEventHandler with enableMainHandlerDump enabled but mainRunner_ null
+ * @tc.type: FUNC
+ */
+HWTEST_F(WatchdogInnerTest, WatchdogInnerTest_DumpMainEventHandler_002, TestSize.Level1)
+{
+    auto& inner = WatchdogInner::GetInstance();
+    inner.mainRunner_ = nullptr;
+    inner.jankParamsMap[KEY_ENABLE_MAIN_HANDLER_DUMP] = 1;
+
+    std::string baseStack = "original_stack";
+    std::string stack = baseStack;
+    inner.DumpMainEventHandler("MAIN_THREAD_JANK", false, false, stack);
+    EXPECT_GE(stack.size(), baseStack.size());
+
+    stack = baseStack;
+    inner.DumpMainEventHandler("MAIN_THREAD_JANK", true, false, stack);
+    EXPECT_EQ(stack, baseStack);
+
+    inner.jankParamsMap[KEY_ENABLE_MAIN_HANDLER_DUMP] = 0;
 }
 } // namespace HiviewDFX
 } // namespace OHOS
