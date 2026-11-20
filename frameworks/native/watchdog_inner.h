@@ -122,7 +122,7 @@ public:
         {KEY_SAMPLE_INTERVAL, SAMPLE_DEFAULT_INTERVAL}, {KEY_IGNORE_STARTUP_TIME, DEFAULT_IGNORE_STARTUP_TIME},
         {KEY_SAMPLE_COUNT, SAMPLE_DEFAULT_COUNT}, {KEY_SAMPLE_REPORT_TIMES, SAMPLE_DEFAULT_REPORT_TIMES},
         {KEY_LOG_TYPE, 0}, {KEY_SET_TIMES_FLAG, SET_TIMES_FLAG}, {KEY_CHECKER_INTERVAL, 0}, {KEY_AUTO_STOP_SAMPLING, 0},
-        {KEY_ENABLE_MAIN_HANDLER_DUMP, 0}
+        {KEY_ENABLE_EVENT_HANDLER_DUMP, 0}
     };
     bool isScroll_ {false};
 
@@ -158,8 +158,8 @@ private:
     std::string DumpMainHandlerTaskQueue();
     void DumpMainEventHandler(std::string eventName, bool isScroll,
         bool appStart, std::string& stack);
-    bool GetEnableMainHandlerDump(const std::map<std::string, std::string>& paramsMap,
-        int& enableMainHandlerDump);
+    bool GetEnableEventHandlerDump(const std::map<std::string, std::string>& paramsMap,
+        int& enableEventHandlerDump);
     bool CheckSampleParam(const std::map<std::string, std::string>& paramsMap, bool keyNeedExist = true);
     std::string SaveFreezeStackToFile(int32_t pid);
     bool AppStartSample(bool isScroll, AppStartContent& startContent);
@@ -246,42 +246,6 @@ private:
     int reservedTime_ {DEFAULT_RESERVED_TIME};
     static std::atomic_bool isTestExist_;
     static ffrt::mutex taskIdCntMtx_;
-};
-
-class LimitedTaskQueueDumper : public AppExecFwk::Dumper {
-public:
-    explicit LimitedTaskQueueDumper(int maxTaskCount) : maxTaskCount_(maxTaskCount) {}
-    ~LimitedTaskQueueDumper() override = default;
-
-    void Dump(const std::string &message) override
-    {
-        if (message.find("No.") != std::string::npos) {
-            if (taskCount_ >= maxTaskCount_) {
-                return;
-            }
-            taskCount_++;
-        }
-        queueInfo_ += message;
-    }
-
-    std::string GetTag() override
-    {
-        return "";
-    }
-
-    std::string GetQueueInfo() const
-    {
-        return queueInfo_;
-    }
-
-    int GetTaskCount() const
-    {
-        return taskCount_;
-    }
-private:
-    int maxTaskCount_ {0};
-    int taskCount_ {0};
-    std::string queueInfo_;
 };
 } // end of namespace HiviewDFX
 } // end of namespace OHOS

@@ -316,17 +316,16 @@ std::string WatchdogInner::DumpMainHandlerTaskQueue()
         XCOLLIE_LOGE("Dump main handler task queue failed, main runner is nullptr.");
         return "";
     }
-    LimitedTaskQueueDumper dumper(MAX_MAIN_HANDLER_DUMP_TASK_COUNT);
-    mainRunner->Dump(dumper);
-    XCOLLIE_LOGI("Dump main handler task queue, task count:%{public}d.", dumper.GetTaskCount());
-    return dumper.GetQueueInfo();
+    std::string queueInfo = mainRunner->DumpStr(MAX_MAIN_HANDLER_DUMP_TASK_COUNT);
+    XCOLLIE_LOGI("Dump main handler task queue, info size:%{public}zu.", queueInfo.size());
+    return queueInfo;
 }
 
 void WatchdogInner::DumpMainEventHandler(std::string eventName, bool isScroll,
     bool appStart, std::string& stack)
 {
     bool isMainThreadJank = !isScroll && !appStart && eventName == MAIN_THREAD_JANK;
-    if (isMainThreadJank && jankParamsMap[KEY_ENABLE_MAIN_HANDLER_DUMP] == 1) {
+    if (isMainThreadJank && jankParamsMap[KEY_ENABLE_EVENT_HANDLER_DUMP] == 1) {
         std::string queueInfo = DumpMainHandlerTaskQueue();
         if (!queueInfo.empty()) {
             stack += "\n" + queueInfo;
@@ -2209,7 +2208,7 @@ void WatchdogInner::UpdateJankParam(SampleJankParams& params)
     jankParamsMap[KEY_IGNORE_STARTUP_TIME] = params.ignoreStartUpTime;
     jankParamsMap[KEY_SAMPLE_COUNT] = params.sampleCount;
     jankParamsMap[KEY_AUTO_STOP_SAMPLING] = params.autoStopSampling;
-    jankParamsMap[KEY_ENABLE_MAIN_HANDLER_DUMP] = params.enableMainHandlerDump;
+    jankParamsMap[KEY_ENABLE_EVENT_HANDLER_DUMP] = params.enableEventHandlerDump;
     if (jankParamsMap[KEY_SET_TIMES_FLAG] == SET_TIMES_FLAG) {
         if (params.eventType == AUTO_STOP_EVENT_TYPE) {
             jankParamsMap[KEY_CHECKER_INTERVAL] = AUTO_STOP_CHECKER_INTERVAL;
@@ -2226,9 +2225,9 @@ void WatchdogInner::UpdateJankParam(SampleJankParams& params)
     }
     XCOLLIE_LOGI("Set thread sampler params success. logType: %{public}d, sample interval: %{public}d, "
         "ignore startUp interval: %{public}d, count: %{public}d, reportTimes: %{public}d, "
-        "autoStopSampling: %{public}d, enableMainHandlerDump: %{public}d",
+        "autoStopSampling: %{public}d, enableEventHandlerDump: %{public}d",
         params.logType, params.sampleInterval, params.ignoreStartUpTime,
-        params.sampleCount, stackContent_.reportTimes, params.autoStopSampling, params.enableMainHandlerDump);
+        params.sampleCount, stackContent_.reportTimes, params.autoStopSampling, params.enableEventHandlerDump);
 }
 
 int WatchdogInner::ConvertStrToNum(const std::map<std::string, std::string>& paramsMap, const std::string& key,
@@ -2270,18 +2269,18 @@ bool WatchdogInner::GetAutoStopSampling(const std::map<std::string, std::string>
     return true;
 }
 
-bool WatchdogInner::GetEnableMainHandlerDump(const std::map<std::string, std::string>& paramsMap,
-    int& enableMainHandlerDump)
+bool WatchdogInner::GetEnableEventHandlerDump(const std::map<std::string, std::string>& paramsMap,
+    int& enableEventHandlerDump)
 {
-    auto it = paramsMap.find(KEY_ENABLE_MAIN_HANDLER_DUMP);
-    std::string enableMainHandlerDumpStr = (it != paramsMap.end()) ? it->second : "";
-    if (!enableMainHandlerDumpStr.empty() && enableMainHandlerDumpStr != "true" &&
-        enableMainHandlerDumpStr != "false") {
-        XCOLLIE_LOGE("Set the enable_main_handler_dump can only be true or false, value: %{public}s.",
-            enableMainHandlerDumpStr.c_str());
+    auto it = paramsMap.find(KEY_ENABLE_EVENT_HANDLER_DUMP);
+    std::string enableEventHandlerDumpStr = (it != paramsMap.end()) ? it->second : "";
+    if (!enableEventHandlerDumpStr.empty() && enableEventHandlerDumpStr != "true" &&
+        enableEventHandlerDumpStr != "false") {
+        XCOLLIE_LOGE("Set the enable_event_handler_dump can only be true or false, value: %{public}s.",
+            enableEventHandlerDumpStr.c_str());
         return false;
     }
-    enableMainHandlerDump = (enableMainHandlerDumpStr == "true") ? 1 : 0;
+    enableEventHandlerDump = (enableEventHandlerDumpStr == "true") ? 1 : 0;
     return true;
 }
 
@@ -2325,15 +2324,15 @@ bool WatchdogInner::CheckSampleParam(const std::map<std::string, std::string>& p
         return false;
     }
 
-    int enableMainHandlerDump;
-    if (!GetEnableMainHandlerDump(paramsMap, enableMainHandlerDump)) {
+    int enableEventHandlerDump;
+    if (!GetEnableEventHandlerDump(paramsMap, enableEventHandlerDump)) {
         return false;
     }
 
     int eventType = keyNeedExist ? 0 : AUTO_STOP_EVENT_TYPE;
 
     SampleJankParams params = {CatchLogType::LOGTYPE_SAMPLE_STACK, ignoreStartUpTime, sampleInterval, sampleCount,
-        reportTimes, autoStopSampling, eventType, enableMainHandlerDump};
+        reportTimes, autoStopSampling, eventType, enableEventHandlerDump};
     UpdateJankParam(params);
     return true;
 }
@@ -2393,7 +2392,7 @@ int WatchdogInner::ConfigEventPolicy(const std::map<std::string, std::string>& p
                 return -1;
             }
             if (logType == CatchLogType::LOGTYPE_NONE &&
-                !GetEnableMainHandlerDump(paramsMap, params.enableMainHandlerDump)) {
+                !GetEnableEventHandlerDump(paramsMap, params.enableEventHandlerDump)) {
                 return -1;
             }
             UpdateJankParam(params);
