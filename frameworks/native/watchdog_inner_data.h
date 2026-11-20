@@ -26,7 +26,7 @@ constexpr const char* KEY_SET_TIMES_FLAG = "set_report_times_flag";
 constexpr const char* KEY_IGNORE_STARTUP_TIME = "ignore_startup_time";
 constexpr const char* KEY_CHECKER_INTERVAL = "checker_interval";
 constexpr const char* KEY_AUTO_STOP_SAMPLING = "auto_stop_sampling";
-constexpr const char* KEY_ENABLE_MAIN_HANDLER_DUMP = "enable_main_handler_dump";
+constexpr const char* KEY_ENABLE_EVENT_HANDLER_DUMP = "enable_event_handler_dump";
 constexpr const char* APP_START_CONFIG = "/data/storage/el2/log/xperf_config";
 constexpr const char* EVENT_APP_START_SLOW = "APP_START_SLOW";
 constexpr const char* EVENT_SLIDING_JANK = "SLIDING_JANK";
@@ -124,7 +124,7 @@ struct SampleJankParams {
     int reportTimes {SAMPLE_DEFAULT_REPORT_TIMES};
     int autoStopSampling {0};
     int eventType {0};
-    int enableMainHandlerDump {0};
+    int enableEventHandlerDump {0};
 };
 } // end of namespace HiviewDFX
 } // end of namespace OHOS
